@@ -24,7 +24,7 @@ jobs:
         fi
     - name: Download success artifact from basic build
       if: ${{ github.event.workflow_run.name == 'General build matrix' }}
-      uses: dawidd6/action-download-artifact@v2
+      uses: dawidd6/action-download-artifact@v6
       with:
         workflow: ${{ github.event.workflow_run.name }}
         run_id: ${{ github.event.workflow_run.id }}
@@ -33,7 +33,7 @@ jobs:
       id: set-basic-build-success
       run: echo "::set-output name=basic-build-success::$( cat basic-build )"
     - name: Download pr id artifact
-      uses: dawidd6/action-download-artifact@v2
+      uses: dawidd6/action-download-artifact@v6
       with:
         workflow: ${{ github.event.workflow_run.name }}
         run_id: ${{ github.event.workflow_run.id }}
