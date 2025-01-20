@@ -11,16 +11,17 @@
 #include "game.h"
 #include "item.h"
 #include "map_helpers.h"
+#include "monattack.h"
 #include "monster.h"
 #include "mtype.h"
 #include "player_helpers.h"
 #include "point.h"
 #include "type_id.h"
 
-static const efftype_id effect_grabbed( "grabbed" );
-static const efftype_id effect_grabbing( "grabbing" );
+static const itype_id itype_roller_shoes_on( "roller_shoes_on" );
+static const itype_id itype_test_roller_blades( "test_roller_blades" );
+static const itype_id itype_test_rollerskates( "test_rollerskates" );
 
-static const mtype_id debug_mon( "debug_mon" );
 static const mtype_id mon_zombie( "mon_zombie" );
 static const mtype_id mon_zombie_smoker( "mon_zombie_smoker" );
 
@@ -86,7 +87,7 @@ static float dodge_wearing_item( avatar &dummy, item &clothing )
     return dummy.get_dodge();
 }
 
-TEST_CASE( "monster::get_hit_base", "[monster][melee][hit]" )
+TEST_CASE( "monster_get_hit_base", "[monster][melee][hit]" )
 {
     clear_map();
 
@@ -96,13 +97,13 @@ TEST_CASE( "monster::get_hit_base", "[monster][melee][hit]" )
     }
 }
 
-TEST_CASE( "Character::get_hit_base", "[character][melee][hit][dex]" )
+TEST_CASE( "Character_get_hit_base", "[character][melee][hit][dex]" )
 {
     clear_map();
 
     avatar &dummy = get_avatar();
     clear_character( dummy );
-    dummy.dodges_left = 1;
+    dummy.set_dodges_left( 1 );
 
     SECTION( "character get_hit_base increases by 1/4 for each point of DEX" ) {
         CHECK( hit_base_with_dex( dummy, 1 ) == 0.25f );
@@ -115,7 +116,7 @@ TEST_CASE( "Character::get_hit_base", "[character][melee][hit][dex]" )
     }
 }
 
-TEST_CASE( "monster::get_dodge_base", "[monster][melee][dodge]" )
+TEST_CASE( "monster_get_dodge_base", "[monster][melee][dodge]" )
 {
     clear_map();
 
@@ -125,7 +126,7 @@ TEST_CASE( "monster::get_dodge_base", "[monster][melee][dodge]" )
     }
 }
 
-TEST_CASE( "Character::get_dodge_base", "[character][melee][dodge][dex][skill]" )
+TEST_CASE( "Character_get_dodge_base", "[character][melee][dodge][dex][skill]" )
 {
     clear_map();
 
@@ -186,7 +187,7 @@ TEST_CASE( "Character::get_dodge_base", "[character][melee][dodge][dex][skill]" 
     }
 }
 
-TEST_CASE( "monster::get_dodge with effects", "[monster][melee][dodge][effect]" )
+TEST_CASE( "monster_get_dodge_with_effects", "[monster][melee][dodge][effect]" )
 {
     clear_map();
 
@@ -217,12 +218,14 @@ TEST_CASE( "monster::get_dodge with effects", "[monster][melee][dodge][effect]" 
     }
 }
 
-TEST_CASE( "player::get_dodge", "[player][melee][dodge]" )
+TEST_CASE( "player_get_dodge", "[player][melee][dodge]" )
 {
     clear_map();
 
     avatar &dummy = get_avatar();
     clear_character( dummy );
+    dodge_base_with_dex_and_skill( dummy, 10, 10 );
+    dummy.set_dodges_left( 1 );
 
     const float base_dodge = dummy.get_dodge_base();
 
@@ -238,12 +241,13 @@ TEST_CASE( "player::get_dodge", "[player][melee][dodge]" )
     }
 }
 
-TEST_CASE( "player::get_dodge with effects", "[player][melee][dodge][effect]" )
+TEST_CASE( "player_get_dodge_with_effects", "[player][melee][dodge][effect]" )
 {
     clear_map();
 
     avatar &dummy = get_avatar();
     clear_character( dummy );
+    dodge_base_with_dex_and_skill( dummy, 8, 4 );
 
     // Compare all effects against base dodge ability
     const float base_dodge = dummy.get_dodge_base();
@@ -266,13 +270,14 @@ TEST_CASE( "player::get_dodge with effects", "[player][melee][dodge][effect]" )
     }
 
     SECTION( "unstable footing: 1/4 dodge" ) {
-        CHECK( dodge_with_effect( dummy, "bouldering" ) == base_dodge / 4 );
+        // FIXME: Margin is flat instead of relative %.
+        CHECK( dodge_with_effect( dummy, "bouldering" ) == Approx( base_dodge / 4 ).margin( 0.1f ) );
     }
 
     SECTION( "skating: amateur or pro?" ) {
-        item skates( "rollerskates" );
-        item blades( "roller_blades" );
-        item heelys( "roller_shoes_on" );
+        item skates( itype_test_rollerskates );
+        item blades( itype_test_roller_blades );
+        item heelys( itype_roller_shoes_on );
 
         REQUIRE( skates.has_flag( flag_ROLLER_QUAD ) );
         REQUIRE( blades.has_flag( flag_ROLLER_INLINE ) );
@@ -297,86 +302,11 @@ TEST_CASE( "player::get_dodge with effects", "[player][melee][dodge][effect]" )
     }
 }
 
-TEST_CASE( "player::get_dodge while grabbed", "[player][melee][dodge][grab]" )
-{
-    clear_map();
-
-    creature_tracker &creatures = get_creature_tracker();
-    avatar &dummy = get_avatar();
-    clear_character( dummy );
-
-    // Base dodge rate when not grabbed
-    const float base_dodge = dummy.get_dodge_base();
-
-    // Four nearby spots
-    tripoint mon1_pos = dummy.pos() + tripoint_north;
-    tripoint mon2_pos = dummy.pos() + tripoint_east;
-    tripoint mon3_pos = dummy.pos() + tripoint_south;
-    tripoint mon4_pos = dummy.pos() + tripoint_west;
-
-    // Surrounded by zombies!
-    monster *zed1 = g->place_critter_at( debug_mon, mon1_pos );
-    monster *zed2 = g->place_critter_at( debug_mon, mon2_pos );
-    monster *zed3 = g->place_critter_at( debug_mon, mon3_pos );
-    monster *zed4 = g->place_critter_at( debug_mon, mon4_pos );
-
-    // Make sure zombies are in their places
-    REQUIRE( creatures.creature_at<monster>( mon1_pos ) );
-    REQUIRE( creatures.creature_at<monster>( mon2_pos ) );
-    REQUIRE( creatures.creature_at<monster>( mon3_pos ) );
-    REQUIRE( creatures.creature_at<monster>( mon4_pos ) );
-
-    // Get grabbed
-    dummy.add_effect( effect_grabbed, 1_minutes );
-    REQUIRE( dummy.has_effect( effect_grabbed ) );
-
-    // When grabbed, dodge skill reduces for each additional grab
-
-    SECTION( "1 grab: 1/2 dodge" ) {
-        zed1->add_effect( effect_grabbing, 1_minutes );
-        REQUIRE( zed1->has_effect( effect_grabbing ) );
-
-        CHECK( dummy.get_dodge() == base_dodge / 2 );
-    }
-
-    SECTION( "2 grabs: 1/3 dodge" ) {
-        zed1->add_effect( effect_grabbing, 1_minutes );
-        zed2->add_effect( effect_grabbing, 1_minutes );
-        REQUIRE( zed1->has_effect( effect_grabbing ) );
-        REQUIRE( zed2->has_effect( effect_grabbing ) );
-
-        CHECK( dummy.get_dodge() == base_dodge / 3 );
-    }
-
-    SECTION( "3 grabs: 1/4 dodge" ) {
-        zed1->add_effect( effect_grabbing, 1_minutes );
-        zed2->add_effect( effect_grabbing, 1_minutes );
-        zed3->add_effect( effect_grabbing, 1_minutes );
-        REQUIRE( zed1->has_effect( effect_grabbing ) );
-        REQUIRE( zed2->has_effect( effect_grabbing ) );
-        REQUIRE( zed3->has_effect( effect_grabbing ) );
-
-        CHECK( dummy.get_dodge() == base_dodge / 4 );
-    }
-
-    SECTION( "4 grabs: 1/5 dodge" ) {
-        zed1->add_effect( effect_grabbing, 1_minutes );
-        zed2->add_effect( effect_grabbing, 1_minutes );
-        zed3->add_effect( effect_grabbing, 1_minutes );
-        zed4->add_effect( effect_grabbing, 1_minutes );
-        REQUIRE( zed1->has_effect( effect_grabbing ) );
-        REQUIRE( zed2->has_effect( effect_grabbing ) );
-        REQUIRE( zed3->has_effect( effect_grabbing ) );
-        REQUIRE( zed4->has_effect( effect_grabbing ) );
-
-        CHECK( dummy.get_dodge() == base_dodge / 5 );
-    }
-}
-
-TEST_CASE( "player::get_dodge stamina effects", "[player][melee][dodge][stamina]" )
+TEST_CASE( "player_get_dodge_stamina_effects", "[player][melee][dodge][stamina]" )
 {
     avatar &dummy = get_avatar();
     clear_character( dummy );
+    dodge_base_with_dex_and_skill( dummy, 8, 0 );
 
     SECTION( "8/8/8/8, no skills, unencumbered" ) {
         const int stamina_max = dummy.get_stamina_max();
@@ -387,37 +317,37 @@ TEST_CASE( "player::get_dodge stamina effects", "[player][melee][dodge][stamina]
 
         SECTION( "75% stamina" ) {
             dummy.set_stamina( .75 * stamina_max );
-            CHECK( dummy.get_dodge() == Approx( 4.0f ).margin( 0.001 ) );
+            CHECK( dummy.get_dodge() == Approx( 3.8f ).margin( 0.1 ) );
         }
 
         SECTION( "50% stamina" ) {
             dummy.set_stamina( .5 * stamina_max );
-            CHECK( dummy.get_dodge() == Approx( 4.0f ).margin( 0.001 ) );
+            CHECK( dummy.get_dodge() == Approx( 2.0f ).margin( 0.1 ) );
         }
 
         SECTION( "40% stamina" ) {
             dummy.set_stamina( .4 * stamina_max );
-            CHECK( dummy.get_dodge() == Approx( 3.2f ).margin( 0.001 ) );
+            CHECK( dummy.get_dodge() == Approx( 1.0f ).margin( 0.1 ) );
         }
 
         SECTION( "30% stamina" ) {
             dummy.set_stamina( .3 * stamina_max );
-            CHECK( dummy.get_dodge() == Approx( 2.4f ).margin( 0.001 ) );
+            CHECK( dummy.get_dodge() == Approx( 0.0f ).margin( 0.1 ) );
         }
 
         SECTION( "20% stamina" ) {
             dummy.set_stamina( .2 * stamina_max );
-            CHECK( dummy.get_dodge() == Approx( 1.6f ).margin( 0.001 ) );
+            CHECK( dummy.get_dodge() == Approx( 0.0f ).margin( 0.1 ) );
         }
 
         SECTION( "10% stamina" ) {
             dummy.set_stamina( .1 * stamina_max );
-            CHECK( dummy.get_dodge() == Approx( 0.8f ).margin( 0.001 ) );
+            CHECK( dummy.get_dodge() == Approx( 0.0f ).margin( 0.1 ) );
         }
 
         SECTION( "0% stamina" ) {
             dummy.set_stamina( 0 );
-            CHECK( dummy.get_dodge() == Approx( 0.0f ).margin( 0.001 ) );
+            CHECK( dummy.get_dodge() == Approx( 0.0f ).margin( 0.1 ) );
         }
     }
 }

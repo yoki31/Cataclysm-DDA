@@ -6,11 +6,13 @@
 #include <list>
 #include <memory>
 #include <new>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "activity_actor_definitions.h"
+#include <activity_handlers.h>
 #include "activity_type.h"
 #include "auto_pickup.h"
 #include "avatar.h"
@@ -42,13 +44,12 @@
 #include "messages.h"
 #include "mission.h"
 #include "monster.h"
-#include "morale_types.h"
 #include "mutation.h"
 #include "npc.h"
 #include "npctrade.h"
-#include "optional.h"
 #include "output.h"
 #include "overmap.h"
+#include "overmap_ui.h"
 #include "overmapbuffer.h"
 #include "pimpl.h"
 #include "player_activity.h"
@@ -70,6 +71,7 @@ static const activity_id ACT_MULTIPLE_FARM( "ACT_MULTIPLE_FARM" );
 static const activity_id ACT_MULTIPLE_FISH( "ACT_MULTIPLE_FISH" );
 static const activity_id ACT_MULTIPLE_MINE( "ACT_MULTIPLE_MINE" );
 static const activity_id ACT_MULTIPLE_MOP( "ACT_MULTIPLE_MOP" );
+static const activity_id ACT_MULTIPLE_READ( "ACT_MULTIPLE_READ" );
 static const activity_id ACT_SOCIALIZE( "ACT_SOCIALIZE" );
 static const activity_id ACT_TRAIN( "ACT_TRAIN" );
 static const activity_id ACT_TRAIN_TEACHER( "ACT_TRAIN_TEACHER" );
@@ -91,15 +93,23 @@ static const efftype_id effect_lying_down( "lying_down" );
 static const efftype_id effect_npc_suspend( "npc_suspend" );
 static const efftype_id effect_pet( "pet" );
 static const efftype_id effect_sleep( "sleep" );
+static const efftype_id effect_socialized_recently( "socialized_recently" );
 
 static const faction_id faction_no_faction( "no_faction" );
 static const faction_id faction_your_followers( "your_followers" );
 
 static const mission_type_id mission_MISSION_REACH_SAFETY( "MISSION_REACH_SAFETY" );
 
+static const morale_type morale_chat( "morale_chat" );
+static const morale_type morale_haircut( "morale_haircut" );
+static const morale_type morale_shave( "morale_shave" );
+
 static const mtype_id mon_chicken( "mon_chicken" );
 static const mtype_id mon_cow( "mon_cow" );
 static const mtype_id mon_horse( "mon_horse" );
+
+static const zone_type_id zone_type_CAMP_FOOD( "CAMP_FOOD" );
+static const zone_type_id zone_type_CAMP_STORAGE( "CAMP_STORAGE" );
 
 struct itype;
 
@@ -114,6 +124,10 @@ void talk_function::assign_mission( npc &p )
     mission *miss = p.chatbin.mission_selected;
     if( miss == nullptr ) {
         debugmsg( "assign_mission: mission_selected == nullptr" );
+        return;
+    } else if( miss->is_assigned() ) {
+        DebugLog( D_WARNING, D_MAIN ) << "assign_mission: mission_id: " << miss->mission_id().str() <<
+                                      " is already assigned!";
         return;
     }
     miss->assign( get_avatar() );
@@ -217,7 +231,7 @@ void talk_function::buy_cow( npc &p )
 
 void spawn_animal( npc &p, const mtype_id &mon )
 {
-    if( monster *const mon_ptr = g->place_critter_around( mon, p.pos(), 1 ) ) {
+    if( monster *const mon_ptr = g->place_critter_around( mon, p.pos_bub(), 1 ) ) {
         mon_ptr->friendly = -1;
         mon_ptr->add_effect( effect_pet, 1_turns, true );
     } else {
@@ -254,6 +268,16 @@ void talk_function::do_mopping( npc &p )
 void talk_function::do_read( npc &p )
 {
     p.do_npc_read();
+}
+
+void talk_function::do_eread( npc &p )
+{
+    p.do_npc_read( true );
+}
+
+void talk_function::do_read_repeatedly( npc &p )
+{
+    p.assign_activity( ACT_MULTIPLE_READ );
 }
 
 void talk_function::dismount( npc &p )
@@ -318,6 +342,12 @@ void talk_function::revert_activity( npc &p )
 {
     p.revert_after_activity();
 }
+
+void talk_function::do_craft( npc &p )
+{
+    p.do_npc_craft();
+}
+
 void talk_function::do_disassembly( npc &p )
 {
     p.assign_activity( ACT_MULTIPLE_DIS );
@@ -332,10 +362,13 @@ void talk_function::goto_location( npc &p )
     tripoint_abs_omt destination;
     Character &player_character = get_player_character();
     for( auto elem : player_character.camps ) {
-        if( elem == p.global_omt_location() ) {
+        if( elem == p.pos_abs_omt() ) {
             continue;
         }
-        cata::optional<basecamp *> camp = overmap_buffer.find_camp( elem.xy() );
+        if( overmap_buffer.seen( elem ) == om_vision_level::unseen ) {
+            continue;
+        }
+        std::optional<basecamp *> camp = overmap_buffer.find_camp( elem.xy() );
         if( !camp ) {
             continue;
         }
@@ -343,38 +376,56 @@ void talk_function::goto_location( npc &p )
         camps.push_back( temp_camp );
     }
     for( const basecamp *iter : camps ) {
-        //~ %1$s: camp name, %2$d and %3$d: coordinates
+        //~ %1$s: camp name, %2$s: coordinates of the camp
         selection_menu.addentry( i++, true, MENU_AUTOASSIGN, pgettext( "camp", "%1$s at %2$s" ),
                                  iter->camp_name(), iter->camp_omt_pos().to_string() );
     }
-    selection_menu.addentry( i++, true, MENU_AUTOASSIGN, _( "My current location" ) );
+    selection_menu.addentry( i++, p.pos_abs_omt() != player_character.pos_abs_omt(),
+                             MENU_AUTOASSIGN, _( "My current location" ) );
+    selection_menu.addentry( i++, !player_character.omt_path.empty(), MENU_AUTOASSIGN,
+                             _( "My destination" ) );
     selection_menu.addentry( i, true, MENU_AUTOASSIGN, _( "Cancel" ) );
     selection_menu.selected = 0;
     selection_menu.query();
     int index = selection_menu.ret;
-    if( index < 0 || index > static_cast<int>( camps.size() + 1 ) ||
-        index == static_cast<int>( camps.size() + 1 ) ) {
+    if( index < 0 || index >= i ) {
         return;
     }
     if( index == static_cast<int>( camps.size() ) ) {
-        destination = player_character.global_omt_location();
+        destination = player_character.pos_abs_omt();
+    } else if( index == static_cast<int>( camps.size() ) + 1 ) {
+        // This looks nuts, but omt_path is emplaced in reverse order. So the front of the vector is our destination
+        destination = player_character.omt_path.front();
     } else {
         const basecamp *selected_camp = camps[index];
         destination = selected_camp->camp_omt_pos();
     }
     p.goal = destination;
-    p.omt_path = overmap_buffer.get_travel_path( p.global_omt_location(), p.goal,
-                 overmap_path_params::for_npc() );
-    if( destination == tripoint_abs_omt() || destination == overmap::invalid_tripoint ||
+    p.omt_path = overmap_buffer.get_travel_path( p.pos_abs_omt(), p.goal,
+                 overmap_path_params::for_npc() ).points;
+    if( destination == tripoint_abs_omt() || destination.is_invalid() ||
         p.omt_path.empty() ) {
         p.goal = npc::no_goal_point;
         p.omt_path.clear();
         add_msg( m_info, _( "That is not a valid destination for %s." ), p.disp_name() );
         return;
     }
+    g->follower_path_to_show = &p; // Necessary for overmap display in tiles version...
+    ui::omap::display_npc_path( p.pos_abs_omt(), p.omt_path );
+    g->follower_path_to_show = nullptr;
+    int tiles_to_travel = p.omt_path.size();
+    time_duration ETA = time_between_npc_OM_moves * tiles_to_travel;
+    ETA = ETA * rng_float( 0.8, 1.2 ); // Add +-20% variance in our estimate
+    if( !query_yn(
+            _( "Estimated time to arrival: %1$s  \nTiles to travel: %2$s  \nIs this path and destination acceptable?" ),
+            to_string_approx( ETA ), tiles_to_travel ) ) {
+        p.goal = npc::no_goal_point;
+        p.omt_path.clear();
+        return;
+    }
     p.set_mission( NPC_MISSION_TRAVELLING );
     p.chatbin.first_topic = p.chatbin.talk_friend_guard;
-    p.guard_pos = cata::nullopt;
+    p.guard_pos = std::nullopt;
     p.set_attitude( NPCATT_NULL );
 }
 
@@ -397,7 +448,7 @@ void talk_function::assign_guard( npc &p )
 
 void talk_function::abandon_camp( npc &p )
 {
-    cata::optional<basecamp *> bcp = overmap_buffer.find_camp( p.global_omt_location().xy() );
+    std::optional<basecamp *> bcp = overmap_buffer.find_camp( p.pos_abs_omt().xy() );
     if( bcp ) {
         basecamp *temp_camp = *bcp;
         temp_camp->abandon_camp();
@@ -406,7 +457,7 @@ void talk_function::abandon_camp( npc &p )
 
 void talk_function::assign_camp( npc &p )
 {
-    cata::optional<basecamp *> bcp = overmap_buffer.find_camp( p.global_omt_location().xy() );
+    std::optional<basecamp *> bcp = overmap_buffer.find_camp( p.pos_abs_omt().xy() );
     if( bcp ) {
         basecamp *temp_camp = *bcp;
         p.set_attitude( NPCATT_NULL );
@@ -438,13 +489,13 @@ void talk_function::stop_guard( npc &p )
     }
     p.chatbin.first_topic = p.chatbin.talk_friend;
     p.goal = npc::no_goal_point;
-    p.guard_pos = cata::nullopt;
+    p.guard_pos = std::nullopt;
     if( p.assigned_camp ) {
-        if( cata::optional<basecamp *> bcp = overmap_buffer.find_camp( ( *p.assigned_camp ).xy() ) ) {
+        if( std::optional<basecamp *> bcp = overmap_buffer.find_camp( ( *p.assigned_camp ).xy() ) ) {
             ( *bcp )->remove_assignee( p.getID() );
             ( *bcp )->validate_assignees();
         }
-        p.assigned_camp = cata::nullopt;
+        p.assigned_camp = std::nullopt;
     }
 }
 
@@ -461,7 +512,7 @@ void talk_function::wake_up( npc &p )
 
 void talk_function::reveal_stats( npc &p )
 {
-    p.disp_info();
+    p.disp_info( true );
 }
 
 void talk_function::end_conversation( npc &p )
@@ -477,36 +528,52 @@ void talk_function::insult_combat( npc &p )
     p.set_attitude( NPCATT_KILL );
 }
 
-void talk_function::bionic_install( npc &p )
+static void bionic_install_common( npc &p, Character &patron, Character &patient )
 {
-    avatar &player_character = get_avatar();
-    item_location bionic = game_menus::inv::install_bionic( player_character, player_character, true );
+    item_location bionic = game_menus::inv::install_bionic( p, patron, patient, true );
 
     if( !bionic ) {
         return;
     }
 
-    const item *tmp = bionic.get_item();
+    item *tmp = bionic.get_item();
+    tmp->set_var( VAR_TRADE_IGNORE, 1 );
     const itype &it = *tmp->type;
 
-    signed int price = tmp->price( true ) * 2;
-    if( !npc_trading::pay_npc( p, price ) ) {
+    signed int price = npc_trading::bionic_install_price( p, patient, bionic );
+    bool const ret = npc_trading::pay_npc( p, price );
+    tmp->erase_var( VAR_TRADE_IGNORE );
+    if( !ret ) {
         return;
     }
 
     //Makes the doctor awesome at installing but not perfect
-    if( player_character.can_install_bionics( it, p, false, 20 ) ) {
+    if( patient.can_install_bionics( it, p, false, 20 ) ) {
         bionic.remove_item();
-        player_character.install_bionics( it, p, false, 20 );
+        patient.install_bionics( it, p, false, 20 );
     }
 }
 
-void talk_function::bionic_remove( npc &p )
+void talk_function::bionic_install( npc &p )
 {
-    Character &player_character = get_player_character();
-    const bionic_collection all_bio = *player_character.my_bionics;
+    Character &pc = get_player_character();
+    bionic_install_common( p, pc, pc );
+}
+
+void talk_function::bionic_install_allies( npc &p )
+{
+    npc *patient = pick_follower();
+    if( !patient ) {
+        return;
+    }
+    bionic_install_common( p, get_player_character(), *patient );
+}
+
+static void bionic_remove_common( npc &p, Character &patient )
+{
+    const bionic_collection all_bio = *patient.my_bionics;
     if( all_bio.empty() ) {
-        popup( _( "You don't have any bionics installed…" ) );
+        popup( _( "%s doesn't have any bionics installed…" ), patient.get_name() );
         return;
     }
 
@@ -514,14 +581,14 @@ void talk_function::bionic_remove( npc &p )
     std::vector<std::string> bionic_names;
     std::vector<const bionic *> bionics;
     for( const bionic &bio : all_bio ) {
-        if( std::find( bionic_types.begin(), bionic_types.end(),
-                       bio.info().itype() ) == bionic_types.end() ) {
-            bionic_types.push_back( bio.info().itype() );
-            if( item::type_is_defined( bio.info().itype() ) ) {
-                item tmp = item( bio.id.str(), calendar::turn_zero );
-                bionic_names.push_back( tmp.tname() + " - " + format_money( 50000 + ( tmp.price( true ) / 4 ) ) );
+        const itype_id &bio_itype = bio.info().itype();
+        if( std::find( bionic_types.begin(), bionic_types.end(), bio_itype ) == bionic_types.end() ) {
+            bionic_types.push_back( bio_itype );
+            if( item::type_is_defined( bio_itype ) ) {
+                item tmp = item( bio_itype, calendar::turn_zero );
+                bionic_names.push_back( tmp.tname() + " - " + format_money( 5000 + ( tmp.price( true ) / 4 ) ) );
             } else {
-                bionic_names.push_back( bio.id.str() + " - " + format_money( 50000 ) );
+                bionic_names.push_back( bio.id.str() + " - " + format_money( 5000 ) );
             }
             bionics.push_back( &bio );
         }
@@ -537,22 +604,32 @@ void talk_function::bionic_remove( npc &p )
 
     signed int price;
     if( item::type_is_defined( bionic_types[bionic_index] ) ) {
-        price = 50000 + ( item( bionic_types[bionic_index], calendar::turn_zero ).price( true ) / 4 );
+        price = 5000 + ( item( bionic_types[bionic_index], calendar::turn_zero ).price( true ) / 4 );
     } else {
-        price = 50000;
+        price = 5000;
     }
     if( !npc_trading::pay_npc( p, price ) ) {
         return;
     }
 
-    //Makes the doctor awesome at installing but not perfect
-    if( player_character.can_uninstall_bionic( *bionics[bionic_index], p,
-            false ) ) {
-        player_character.amount_of(
-            bionic_types[bionic_index] ); // ??? this does nothing, it just queries the count
-        player_character.uninstall_bionic( *bionics[bionic_index], p, false );
+    //Makes the doctor awesome at uninstalling but not perfect
+    if( patient.can_uninstall_bionic( *bionics[bionic_index], p, false, 20 ) ) {
+        patient.uninstall_bionic( *bionics[bionic_index], p, false, 20 );
     }
+}
 
+void talk_function::bionic_remove( npc &p )
+{
+    bionic_remove_common( p, get_player_character() );
+}
+
+void talk_function::bionic_remove_allies( npc &p )
+{
+    npc *patient = pick_follower();
+    if( !patient ) {
+        return;
+    }
+    bionic_remove_common( p, *patient );
 }
 
 void talk_function::give_equipment( npc &p )
@@ -593,9 +670,47 @@ void talk_function::give_equipment_allowance( npc &p, int allowance )
     p.add_effect( effect_asked_for_item, 3_hours );
 }
 
+void talk_function::lesser_give_aid( npc &p )
+{
+    Character &player_character = get_player_character();
+    for( const bodypart_id &bp :
+         player_character.get_all_body_parts( get_body_part_flags::only_main ) ) {
+        player_character.heal( bp, rng( 5, 15 ) );
+        if( player_character.has_effect( effect_bleed, bp.id() ) ) {
+            player_character.remove_effect( effect_bleed, bp );
+        }
+    }
+    const int moves = to_moves<int>( 15_minutes );
+    player_character.assign_activity( ACT_WAIT_NPC, moves );
+    player_character.activity.str_values.push_back( p.get_name() );
+    p.add_effect( effect_currently_busy, 60_minutes );
+}
+
+void talk_function::lesser_give_all_aid( npc &p )
+{
+    lesser_give_aid( p ); // Provide lesser aid to the player first
+
+    Character &player_character = get_player_character();
+    for( npc &guy : g->all_npcs() ) {
+        if( guy.is_walking_with() && rl_dist( guy.pos_bub(), player_character.pos_bub() ) < PICKUP_RANGE ) {
+            for( const bodypart_id &bp :
+                 guy.get_all_body_parts( get_body_part_flags::only_main ) ) {
+                guy.heal( bp, rng( 5, 15 ) );
+                if( guy.has_effect( effect_bleed, bp.id() ) ) {
+                    guy.remove_effect( effect_bleed, bp );
+                }
+            }
+        }
+    }
+
+    const int moves = to_moves<int>( 30_minutes );
+    player_character.assign_activity( ACT_WAIT_NPC, moves );
+    player_character.activity.str_values.push_back( p.get_name() );
+    p.add_effect( effect_currently_busy, 120_minutes );
+}
+
 void talk_function::give_aid( npc &p )
 {
-    p.add_effect( effect_currently_busy, 30_minutes );
     Character &player_character = get_player_character();
     for( const bodypart_id &bp :
          player_character.get_all_body_parts( get_body_part_flags::only_main ) ) {
@@ -610,17 +725,20 @@ void talk_function::give_aid( npc &p )
             player_character.remove_effect( effect_infected, bp );
         }
     }
-    const int moves = to_moves<int>( 100_minutes );
+
+    const int moves = to_moves<int>( 30_minutes );
     player_character.assign_activity( ACT_WAIT_NPC, moves );
     player_character.activity.str_values.push_back( p.get_name() );
+    p.add_effect( effect_currently_busy, 120_minutes );
 }
 
 void talk_function::give_all_aid( npc &p )
 {
-    p.add_effect( effect_currently_busy, 30_minutes );
-    give_aid( p );
+    give_aid( p ); // Provide aid to the player first
+
+    Character &player_character = get_player_character();
     for( npc &guy : g->all_npcs() ) {
-        if( guy.is_walking_with() && rl_dist( guy.pos(), get_player_character().pos() ) < PICKUP_RANGE ) {
+        if( guy.is_walking_with() && rl_dist( guy.pos_bub(), player_character.pos_bub() ) < PICKUP_RANGE ) {
             for( const bodypart_id &bp :
                  guy.get_all_body_parts( get_body_part_flags::only_main ) ) {
                 guy.heal( bp, 5 * rng( 2, 5 ) );
@@ -636,6 +754,11 @@ void talk_function::give_all_aid( npc &p )
             }
         }
     }
+
+    const int moves = to_moves<int>( 60_minutes );
+    player_character.assign_activity( ACT_WAIT_NPC, moves );
+    player_character.activity.str_values.push_back( p.get_name() );
+    p.add_effect( effect_currently_busy, 240_minutes );
 }
 
 static void generic_barber( const std::string &mut_type )
@@ -650,23 +773,24 @@ static void generic_barber( const std::string &mut_type )
     hair_menu.text = menu_text;
     int index = 0;
     hair_menu.addentry( index, true, 'q', _( "Actually…  I've changed my mind." ) );
-    std::vector<trait_id> hair_muts = get_mutations_in_type( mut_type );
+    std::vector<trait_and_var> hair_muts = mutations_var_in_type( mut_type );
     Character &player_character = get_player_character();
-    trait_id cur_hair;
-    for( const trait_id &elem : hair_muts ) {
-        if( player_character.has_trait( elem ) ) {
+    trait_and_var cur_hair;
+    for( const trait_and_var &elem : hair_muts ) {
+        if( player_character.has_trait_variant( elem ) ) {
             cur_hair = elem;
         }
         index += 1;
-        hair_menu.addentry( index, true, MENU_AUTOASSIGN, elem.obj().name() );
+        hair_menu.addentry( index, true, MENU_AUTOASSIGN, elem.name() );
     }
     hair_menu.query();
     int choice = hair_menu.ret;
     if( choice != 0 ) {
-        if( player_character.has_trait( cur_hair ) ) {
-            player_character.remove_mutation( cur_hair, true );
+        if( player_character.has_trait( cur_hair.trait ) ) {
+            player_character.remove_mutation( cur_hair.trait, true );
         }
-        player_character.set_mutation( hair_muts[ choice - 1 ] );
+        const trait_and_var &chosen = hair_muts[choice - 1];
+        player_character.set_mutation( chosen.trait, chosen.trait->variant( chosen.variant ) );
         add_msg( m_info, _( "You get a trendy new cut!" ) );
     }
 }
@@ -684,7 +808,7 @@ void talk_function::barber_hair( npc &/*p*/ )
 void talk_function::buy_haircut( npc &p )
 {
     Character &player_character = get_player_character();
-    player_character.add_morale( MORALE_HAIRCUT, 5, 5, 720_minutes, 3_minutes );
+    player_character.add_morale( morale_haircut, 5, 5, 720_minutes, 3_minutes );
     const int moves = to_moves<int>( 20_minutes );
     player_character.assign_activity( ACT_WAIT_NPC, moves );
     player_character.activity.str_values.push_back( p.get_name() );
@@ -694,17 +818,11 @@ void talk_function::buy_haircut( npc &p )
 void talk_function::buy_shave( npc &p )
 {
     Character &player_character = get_player_character();
-    player_character.add_morale( MORALE_SHAVE, 10, 10, 360_minutes, 3_minutes );
+    player_character.add_morale( morale_shave, 10, 10, 360_minutes, 3_minutes );
     const int moves = to_moves<int>( 5_minutes );
     player_character.assign_activity( ACT_WAIT_NPC, moves );
     player_character.activity.str_values.push_back( p.get_name() );
     add_msg( m_good, _( "%s gives you a decent shave…" ), p.get_name() );
-}
-
-void talk_function::morale_chat( npc &p )
-{
-    get_player_character().add_morale( MORALE_CHAT, rng( 3, 10 ), 10, 200_minutes, 5_minutes / 2 );
-    add_msg( m_good, _( "That was a pleasant conversation with %s…" ), p.disp_name() );
 }
 
 void talk_function::morale_chat_activity( npc &p )
@@ -717,61 +835,24 @@ void talk_function::morale_chat_activity( npc &p )
         p.say( SNIPPET.random_from_category( "npc_socialize" ).value_or( translation() ).translated() );
     }
     add_msg( m_good, _( "That was a pleasant conversation with %s." ), p.disp_name() );
-    player_character.add_morale( MORALE_CHAT, rng( 3, 10 ), 10, 200_minutes, 5_minutes / 2 );
-}
-
-void talk_function::buy_10_logs( npc &p )
-{
-    std::vector<tripoint_abs_omt> places =
-        overmap_buffer.find_all( get_player_character().global_omt_location(), "ranch_camp_67", 1,
-                                 false );
-    if( places.empty() ) {
-        debugmsg( "Couldn't find %s", "ranch_camp_67" );
-        return;
-    }
-    const auto &cur_om = g->get_cur_om();
-    std::vector<tripoint_abs_omt> places_om;
-    for( const tripoint_abs_omt &i : places ) {
-        if( &cur_om == overmap_buffer.get_existing_om_global( i ).om ) {
-            places_om.push_back( i );
+    // 50% chance of increasing 1 npc opinion value each social chat after 6hr
+    if( !p.has_effect( effect_socialized_recently ) ) {
+        switch( rng( 1, 3 ) ) {
+            case 1:
+                p.op_of_u.trust += rng( 0, 1 );
+                break;
+            case 2:
+                p.op_of_u.value += rng( 0, 1 );
+                break;
+            case 3:
+                if( p.op_of_u.anger > 0 ) {
+                    p.op_of_u.anger += rng( 0, -1 );
+                }
+                break;
         }
+        p.add_effect( effect_socialized_recently, 6_hours );
     }
-
-    const tripoint_abs_omt site = random_entry( places_om );
-    tinymap bay;
-    bay.load( project_to<coords::sm>( site ), false );
-    bay.spawn_item( point( 7, 15 ), "log", 10 );
-    bay.save();
-
-    p.add_effect( effect_currently_busy, 1_days );
-    add_msg( m_good, _( "%s drops the logs off in the garage…" ), p.get_name() );
-}
-
-void talk_function::buy_100_logs( npc &p )
-{
-    std::vector<tripoint_abs_omt> places =
-        overmap_buffer.find_all( get_player_character().global_omt_location(), "ranch_camp_67", 1,
-                                 false );
-    if( places.empty() ) {
-        debugmsg( "Couldn't find %s", "ranch_camp_67" );
-        return;
-    }
-    const auto &cur_om = g->get_cur_om();
-    std::vector<tripoint_abs_omt> places_om;
-    for( auto &i : places ) {
-        if( &cur_om == overmap_buffer.get_existing_om_global( i ).om ) {
-            places_om.push_back( i );
-        }
-    }
-
-    const tripoint_abs_omt site = random_entry( places_om );
-    tinymap bay;
-    bay.load( project_to<coords::sm>( site ), false );
-    bay.spawn_item( point( 7, 15 ), "log", 100 );
-    bay.save();
-
-    p.add_effect( effect_currently_busy, 7_days );
-    add_msg( m_good, _( "%s drops the logs off in the garage…" ), p.get_name() );
+    player_character.add_morale( morale_chat, rng( 3, 10 ), 10, 200_minutes, 5_minutes / 2 );
 }
 
 /*
@@ -790,9 +871,7 @@ void talk_function::drop_items_in_place( npc &p )
     }
     if( !to_drop.empty() ) {
         // spawn a activity for the npc to drop the specified items
-        p.assign_activity( player_activity( drop_activity_actor(
-                                                to_drop, tripoint_zero, false
-                                            ) ) );
+        p.assign_activity( drop_activity_actor( to_drop, tripoint_rel_ms::zero, false ) );
         p.say( "<acknowledged>" );
     } else {
         p.say( _( "I don't have anything to drop off." ) );
@@ -806,6 +885,9 @@ void talk_function::follow( npc &p )
     p.set_fac( faction_your_followers );
     get_player_character().cash += p.cash;
     p.cash = 0;
+    if( !p.custom_profession.empty() ) {
+        p.custom_profession.clear();
+    }
 }
 
 void talk_function::follow_only( npc &p )
@@ -864,6 +946,7 @@ void talk_function::leave( npc &p )
     g->remove_npc_follower( p.getID() );
     std::string new_fac_id = "solo_";
     new_fac_id += p.name;
+    new_fac_id += std::to_string( p.getID().get_value() );
     p.job.clear_all_priorities();
     // create a new "lone wolf" faction for this one NPC
     faction *new_solo_fac = g->faction_manager_ptr->add_new_faction( p.name,
@@ -907,7 +990,7 @@ bool talk_function::drop_stolen_item( item &cur_item, npc &p )
         item to_drop = player_character.i_rem( &cur_item );
         to_drop.remove_old_owner();
         to_drop.set_owner( p );
-        here.add_item_or_charges( player_character.pos(), to_drop );
+        here.add_item_or_charges( player_character.pos_bub(), to_drop );
         dropped = true;
     } else if( cur_item.is_container() ) {
         bool changed = false;
@@ -969,12 +1052,20 @@ void talk_function::drop_weapon( npc &p )
         return;
     }
     item weap = p.remove_weapon();
-    get_map().add_item_or_charges( p.pos(), weap );
+    get_map().add_item_or_charges( p.pos_bub(), weap );
 }
 
 void talk_function::player_weapon_away( npc &/*p*/ )
 {
     Character &player_character = get_player_character();
+
+    std::optional<bionic *> bionic_weapon = player_character.find_bionic_by_uid(
+            player_character.get_weapon_bionic_uid() );
+    if( bionic_weapon ) {
+        player_character.deactivate_bionic( **bionic_weapon );
+        return;
+    }
+
     player_character.i_add( player_character.remove_weapon() );
 }
 
@@ -982,15 +1073,15 @@ void talk_function::player_weapon_drop( npc &/*p*/ )
 {
     Character &player_character = get_player_character();
     item weap = player_character.remove_weapon();
-    get_map().add_item_or_charges( player_character.pos(), weap );
+    drop_on_map( player_character, item_drop_reason::deliberate, {weap}, player_character.pos_bub() );
 }
 
 void talk_function::lead_to_safety( npc &p )
 {
-    mission *reach_safety__mission = mission::reserve_new( mission_MISSION_REACH_SAFETY,
-                                     character_id() );
-    reach_safety__mission->assign( get_avatar() );
-    p.goal = reach_safety__mission->get_target();
+    mission *reach_safety_mission = mission::reserve_new( mission_MISSION_REACH_SAFETY,
+                                    character_id() );
+    reach_safety_mission->assign( get_avatar() );
+    p.goal = reach_safety_mission->get_target();
     p.set_attitude( NPCATT_LEAD );
 }
 
@@ -1036,7 +1127,7 @@ void talk_function::start_training_seminar( npc &p )
     d.spell = p.chatbin.dialogue_spell;
     d.prof = p.chatbin.proficiency;
     std::vector<npc *> followers = g->get_npcs_if( [&p]( const npc & n ) {
-        return n.is_player_ally() && n.is_following() && n.can_hear( p.pos(), p.get_shout_volume() );
+        return n.is_player_ally() && n.is_following() && n.can_hear( p.pos_bub(), p.get_shout_volume() );
     } );
     std::vector<Character *> students;
     for( npc *n : followers ) {
@@ -1138,11 +1229,10 @@ void talk_function::start_training_gen( Character &teacher, std::vector<Characte
             return;
         }
     }
-    player_activity tact = player_activity( ACT_TRAIN_TEACHER, to_moves<int>( time ),
-                                            teacher.getID().get_value(), 0, name );
+    const int teacher_id = teacher.getID().get_value();
+    player_activity tact( ACT_TRAIN_TEACHER, to_moves<int>( time ), teacher_id, 0, name );
     for( Character *student : students ) {
-        player_activity act = player_activity( ACT_TRAIN, to_moves<int>( time ),
-                                               teacher.getID().get_value(), 0, name );
+        player_activity act( ACT_TRAIN, to_moves<int>( time ), teacher_id, 0, name );
         act.values.push_back( expert_multiplier );
         student->assign_activity( act );
         tact.values.push_back( student->getID().get_value() );
@@ -1155,12 +1245,12 @@ void talk_function::start_training_gen( Character &teacher, std::vector<Characte
 npc *pick_follower()
 {
     std::vector<npc *> followers;
-    std::vector<tripoint> locations;
+    std::vector<tripoint_bub_ms> locations;
 
     for( npc &guy : g->all_npcs() ) {
         if( guy.is_player_ally() && get_player_view().sees( guy ) ) {
             followers.push_back( &guy );
-            locations.push_back( guy.pos() );
+            locations.push_back( guy.pos_bub() );
         }
     }
 
@@ -1169,7 +1259,6 @@ npc *pick_follower()
     uilist menu;
     menu.text = _( "Select a follower" );
     menu.callback = &callback;
-    menu.w_y_setup = 2;
 
     for( const npc *p : followers ) {
         menu.addentry( -1, true, MENU_AUTOASSIGN, p->get_name() );
@@ -1181,6 +1270,43 @@ npc *pick_follower()
     }
 
     return followers[ menu.ret ];
+}
+
+void talk_function::distribute_food_auto( npc &p )
+{
+    std::optional<basecamp *> bcp = overmap_buffer.find_camp( p.pos_abs_omt().xy() );
+    if( !bcp ) {
+        debugmsg( "distribute_food_auto called without a basecamp, aborting." );
+        return;
+    }
+    basecamp *npc_camp = *bcp;
+    if( !npc_camp->allowed_access_by( p ) ) {
+        debugmsg( "distribute_food_auto called on npc that isn't allowed to access local basecamp storage, aborting." );
+        return;
+    }
+
+    zone_manager &mgr = zone_manager::get_manager();
+    const tripoint_abs_ms &npc_abs_loc = p.pos_abs();
+    // 3x3 square with NPC in the center, includes NPC's tile and all adjacent ones, for overflow
+    const tripoint_abs_ms top_left = npc_abs_loc + point::north_west;
+    const tripoint_abs_ms bottom_right = npc_abs_loc + point::south_east;
+    std::string zone_name = "ERROR IF YOU SEE THIS (dummy zone talk_function::distribute_food_auto)";
+    const faction_id &fac_id = p.get_fac_id();
+    mgr.add( zone_name, zone_type_CAMP_FOOD, fac_id, false, true, top_left, bottom_right );
+    mgr.add( zone_name, zone_type_CAMP_STORAGE, fac_id, false, true, top_left,
+             bottom_right );
+    npc_camp->distribute_food( false );
+    // Now we clean up all camp zones, though there SHOULD only be the two we just made
+    auto lambda_remove_zones = [&mgr, &fac_id]( zone_type_id type_to_remove ) {
+        std::vector<zone_manager::ref_zone_data> p_zones = mgr.get_zones( fac_id );
+        for( zone_data &a_zone : p_zones ) {
+            if( a_zone.get_type() == type_to_remove ) {
+                mgr.remove( a_zone );
+            }
+        }
+    };
+    lambda_remove_zones( zone_type_CAMP_FOOD );
+    lambda_remove_zones( zone_type_CAMP_STORAGE );
 }
 
 void talk_function::copy_npc_rules( npc &p )
@@ -1196,15 +1322,6 @@ void talk_function::set_npc_pickup( npc &p )
     p.rules.pickup_whitelist->show( p.name );
 }
 
-void talk_function::npc_die( npc &p )
-{
-    p.die( nullptr );
-    const shared_ptr_fast<npc> guy = overmap_buffer.find_npc( p.getID() );
-    if( guy && !guy->is_dead() ) {
-        guy->marked_for_death = true;
-    }
-}
-
 void talk_function::npc_thankful( npc &p )
 {
     if( p.get_attitude() == NPCATT_MUG || p.get_attitude() == NPCATT_WAIT_FOR_LEAVE ||
@@ -1215,11 +1332,17 @@ void talk_function::npc_thankful( npc &p )
     if( p.chatbin.first_topic != p.chatbin.talk_friend ) {
         p.chatbin.first_topic = p.chatbin.talk_stranger_friendly;
     }
-    p.personality.aggression -= 1;
+    int8_t &aggro = p.personality.aggression;
+    aggro = std::clamp<int8_t>( aggro - 1, NPC_PERSONALITY_MIN, NPC_PERSONALITY_MAX );
 
 }
 
 void talk_function::clear_overrides( npc &p )
 {
     p.rules.clear_overrides();
+}
+
+void talk_function::pick_style( npc &p )
+{
+    p.martial_arts_data->pick_style( p );
 }

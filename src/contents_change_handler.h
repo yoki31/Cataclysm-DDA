@@ -2,10 +2,13 @@
 #ifndef CATA_SRC_CONTENTS_CHANGE_HANDLER_H
 #define CATA_SRC_CONTENTS_CHANGE_HANDLER_H
 
-#include <functional>
 #include <vector>
 
 #include "item_location.h"
+
+class Character;
+class JsonOut;
+class JsonValue;
 
 /**
  * Records a batch of unsealed containers and handles spilling at once. This
@@ -41,7 +44,7 @@ class contents_change_handler
         /**
          * Deserialization for activities
          */
-        void deserialize( JsonIn &jsin );
+        void deserialize( const JsonValue &jsin );
     private:
         std::vector<item_location> unsealed;
 };

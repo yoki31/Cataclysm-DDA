@@ -7,11 +7,16 @@
 #include <map>
 #include <vector>
 
+#include "shop_cons_rate.h"
 #include "translations.h"
 #include "type_id.h"
 
+class npc;
 class JsonObject;
 class Trait_group;
+
+struct const_dialogue;
+struct faction_price_rule;
 
 namespace trait_group
 {
@@ -42,15 +47,23 @@ class distribution
         static distribution dice_roll( int sides, int size );
         static distribution one_in( float in );
 };
-
 struct shopkeeper_item_group {
-    item_group_id id;
-    int trust;
-    bool strict;
+    item_group_id id = item_group_id( "EMPTY_GROUP" );
+    int trust = 0;
+    bool strict = false;
+    translation refusal;
+    std::function<bool( const_dialogue const & )> condition;
 
-    shopkeeper_item_group() : id( item_group_id( "EMPTY_GROUP" ) ), trust( 0 ), strict( false ) {}
-    shopkeeper_item_group( const std::string &id, int trust, bool strict ) :
-        id( item_group_id( id ) ), trust( trust ), strict( strict ) {}
+    // Rigid shopkeeper groups will be processed a single time. Default groups are not rigid, and will be processed until the shopkeeper has no more room or remaining value to populate goods with.
+    bool rigid = false;
+
+    shopkeeper_item_group() = default;
+    shopkeeper_item_group( const std::string &id, int trust, bool strict, bool rigid = false ) :
+        id( item_group_id( id ) ), trust( trust ), strict( strict ), rigid( rigid ) {}
+
+    bool can_sell( npc const &guy ) const;
+    bool can_restock( npc const &guy ) const;
+    std::string get_refusal() const;
 
     void deserialize( const JsonObject &jo );
 };
@@ -62,11 +75,17 @@ class npc_class
         translation job_description;
 
         bool common = true;
+        double common_spawn_weight = 1;
 
         distribution bonus_str;
         distribution bonus_dex;
         distribution bonus_int;
         distribution bonus_per;
+
+        distribution bonus_aggression;
+        distribution bonus_bravery;
+        distribution bonus_collector;
+        distribution bonus_altruism;
 
         std::map<skill_id, distribution> skills;
         // Just for finalization
@@ -74,15 +93,24 @@ class npc_class
 
         // first -> item group, second -> trust
         std::vector<shopkeeper_item_group> shop_item_groups;
+        std::vector<faction_price_rule> shop_price_rules;
+        shopkeeper_cons_rates_id shop_cons_rates_id = shopkeeper_cons_rates_id::NULL_ID();
+        shopkeeper_blacklist_id shop_blacklist_id = shopkeeper_blacklist_id::NULL_ID();
+        time_duration restock_interval = 6_days;
 
     public:
         npc_class_id id;
         std::vector<std::pair<npc_class_id, mod_id>> src;
         bool was_loaded = false;
 
+        // By default, NPCs will be open to trade anything in their inventory, including worn items. If this is set to false, they won't sell items that they're directly wearing or wielding. Items inside of pockets/bags/etc are still fair game.
+        bool sells_belongings = true;
+
         item_group_id worn_override;
         item_group_id carry_override;
         item_group_id weapon_override;
+
+        translation bye_message_override;
 
         std::map<mutation_category_id, distribution> mutation_rounds;
         trait_group::Trait_group_tag traits = trait_group::Trait_group_tag( "EMPTY_GROUP" );
@@ -100,13 +128,22 @@ class npc_class
         int roll_intelligence() const;
         int roll_perception() const;
 
+        int roll_aggression() const;
+        int roll_bravery() const;
+        int roll_collector() const;
+        int roll_altruism() const;
+
         int roll_skill( const skill_id & ) const;
 
         const std::vector<shopkeeper_item_group> &get_shopkeeper_items() const;
+        const shopkeeper_cons_rates &get_shopkeeper_cons_rates() const;
+        const shopkeeper_blacklist &get_shopkeeper_blacklist() const;
+        const time_duration &get_shop_restock_interval() const;
+        faction_price_rule const *get_price_rules( item const &it, npc const &guy ) const;
 
-        void load( const JsonObject &jo, const std::string &src );
+        bool is_common() const;
 
-        static const npc_class_id &from_legacy_int( int i );
+        void load( const JsonObject &jo, std::string_view src );
 
         static const npc_class_id &random_common();
 
@@ -120,26 +157,5 @@ class npc_class
 
         static void check_consistency();
 };
-
-// TODO: Get rid of that
-extern const npc_class_id NC_NONE;
-extern const npc_class_id NC_EVAC_SHOPKEEP;
-extern const npc_class_id NC_SHOPKEEP;
-extern const npc_class_id NC_HACKER;
-extern const npc_class_id NC_CYBORG;
-extern const npc_class_id NC_DOCTOR;
-extern const npc_class_id NC_TRADER;
-extern const npc_class_id NC_NINJA;
-extern const npc_class_id NC_COWBOY;
-extern const npc_class_id NC_SCIENTIST;
-extern const npc_class_id NC_BOUNTY_HUNTER;
-extern const npc_class_id NC_THUG;
-extern const npc_class_id NC_SCAVENGER;
-extern const npc_class_id NC_ARSONIST;
-extern const npc_class_id NC_HUNTER;
-extern const npc_class_id NC_SOLDIER;
-extern const npc_class_id NC_BARTENDER;
-extern const npc_class_id NC_JUNK_SHOPKEEP;
-extern const npc_class_id NC_HALLU;
 
 #endif // CATA_SRC_NPC_CLASS_H

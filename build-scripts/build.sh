@@ -26,6 +26,8 @@ then
 
     tools/json_tools/generic_guns_validator.py
 
+    tools/json_tools/gun_variant_validator.py -v -cin data/json
+
     # Also build chkjson (even though we're not using it), to catch any
     # compile errors there
     make -j "$num_jobs" chkjson
@@ -38,8 +40,8 @@ fi
 
 ccache --zero-stats
 # Increase cache size because debug builds generate large object files
-ccache -M 5G
-ccache --show-stats
+ccache -M 20G
+ccache --show-stats --verbose
 
 function run_test
 {
@@ -49,7 +51,7 @@ function run_test
     prefix=$2
     shift 2
 
-    $WINE "$test_bin" --min-duration 0.2 --use-colour yes --rng-seed time $EXTRA_TEST_OPTS "$@" 2>&1 | sed -E 's/^(::(warning|error|debug)[^:]*::)?/\1'"$prefix"'/' || test_exit_code="${PIPESTATUS[0]}" sed_exit_code="${PIPESTATUS[1]}"
+    $WINE "$test_bin" --min-duration 0.2 --use-colour yes --rng-seed time --order lex $EXTRA_TEST_OPTS "$@" 2>&1 | sed -E 's/^(::(warning|error|debug)[^:]*::)?/\1'"$prefix"'/' || test_exit_code="${PIPESTATUS[0]}" sed_exit_code="${PIPESTATUS[1]}"
     if [ "$test_exit_code" -ne "0" ]
     then
         echo "$3test exited with code $test_exit_code"
@@ -103,6 +105,7 @@ then
         -DCMAKE_BUILD_TYPE="$build_type" \
         -DTILES=${TILES:-0} \
         -DSOUND=${SOUND:-0} \
+        -DLIBBACKTRACE=${LIBBACKTRACE:-0} \
         "${cmake_extra_opts[@]}" \
         ..
     if [ -n "$CATA_CLANG_TIDY" ]
@@ -138,23 +141,42 @@ then
         cd ..
         rm -f compile_commands.json && ln -s build/compile_commands.json
 
-        ./build-scripts/files_changed || echo 'Unable to determine changed files'
-
-        # We want to first analyze all files that changed in this PR, then as
-        # many others as possible, in a random order.
         set +x
+        # Check for changes to any files that would require us to run clang-tidy across everything
+        changed_global_files="$( ( ./build-scripts/files_changed || echo 'unknown') | \
+            egrep -i "clang-tidy|build-scripts|cmake|unknown" || true )"
+        if [ -n "$changed_global_files" ]
+        then
+            first_changed_file="$(echo "$changed_global_files" | head -n 1)"
+            echo "Analyzing all files because $first_changed_file was changed"
+            TIDY="all"
+        fi
+
         all_cpp_files="$( \
             grep '"file": "' build/compile_commands.json | \
             sed "s+.*$PWD/++;s+\"$++")"
-        changed_files="$( ./build-scripts/files_changed || echo unknown )"
-        changed_cpp_files="$( \
-            echo "$changed_files" | grep -F "$all_cpp_files" || true )"
-        if [ -n "$changed_cpp_files" ]
+        if [ "$TIDY" == "all" ]
         then
-            remaining_cpp_files="$( \
-                echo "$all_cpp_files" | grep -v -F "$changed_cpp_files" || true )"
+            echo "Analyzing all files"
+            tidyable_cpp_files=$all_cpp_files
         else
-            remaining_cpp_files="$all_cpp_files"
+            make \
+                -j $num_jobs \
+                ${COMPILER:+COMPILER=$COMPILER} \
+                TILES=${TILES:-0} \
+                SOUND=${SOUND:-0} \
+                includes
+
+            ./build-scripts/files_changed > ./files_changed
+            tidyable_cpp_files="$( \
+                ( build-scripts/get_affected_files.py ./files_changed ) || \
+                echo unknown )"
+
+            if [ "tidyable_cpp_files" == "unknown" ]
+            then
+                echo "Unable to determine affected files, tidying all files"
+                tidyable_cpp_files=$all_cpp_files
+            fi
         fi
 
         function analyze_files_in_random_order
@@ -168,19 +190,8 @@ then
             fi
         }
 
-        echo "Analyzing changed files"
-        analyze_files_in_random_order "$changed_cpp_files"
-
-        # Check for changes to any files that would require us to run clang-tidy across everything
-        changed_global_files="$( \
-            echo "$changed_files" | \
-            egrep -i "\.h$|clang-tidy|build-scripts|cmake|unknown" || true )"
-        if [ -n "$changed_global_files" ]
-        then
-            first_changed_file="$(echo "$changed_global_files" | head -n 1)"
-            echo "Analyzing remaining files because $first_changed_file was changed"
-            analyze_files_in_random_order "$remaining_cpp_files"
-        fi
+        echo "Analyzing affected files"
+        analyze_files_in_random_order "$tidyable_cpp_files"
         set -x
     else
         # Regular build
@@ -205,7 +216,7 @@ then
     # fills the log with nonsense.
     TERM=dumb ./gradlew assembleExperimentalRelease -Pj=$num_jobs -Plocalize=false -Pabi_arm_32=false -Pabi_arm_64=true -Pdeps=/home/travis/build/CleverRaven/Cataclysm-DDA/android/app/deps.zip
 else
-    make -j "$num_jobs" RELEASE=1 CCACHE=1 CROSS="$CROSS_COMPILATION" LINTJSON=0
+    make -j "$num_jobs" RELEASE=1 CCACHE=1 CROSS="$CROSS_COMPILATION" LINTJSON=0 LIBBACKTRACE="$LIBBACKTRACE"
 
     export ASAN_OPTIONS=detect_odr_violation=1
     export UBSAN_OPTIONS=print_stacktrace=1
@@ -224,7 +235,7 @@ else
         ./build-scripts/get_all_mods.py | \
             while read mods
             do
-                run_test ./tests/cata_test '(all_mods)=> ' '~*' --user-dir=all_modded --mods="${mods}"
+                run_test ./tests/cata_test '(all_mods)=> ' '[force_load_game]' --user-dir=all_modded --mods="${mods}"
             done
     fi
 fi

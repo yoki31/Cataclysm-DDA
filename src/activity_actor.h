@@ -2,20 +2,17 @@
 #ifndef CATA_SRC_ACTIVITY_ACTOR_H
 #define CATA_SRC_ACTIVITY_ACTOR_H
 
-#include <iosfwd>
 #include <memory>
+#include <string>
 #include <unordered_map>
 
 #include "activity_type.h"
 #include "clone_ptr.h"
-#include "point.h"
 #include "type_id.h"
 
 class Character;
-class JsonIn;
 class JsonOut;
 class JsonValue;
-class monster;
 class player_activity;
 
 class activity_actor
@@ -40,7 +37,7 @@ class activity_actor
         /**
          * Should return the activity id of the corresponding activity
          */
-        virtual activity_id get_type() const = 0;
+        virtual const activity_id &get_type() const = 0;
 
         /**
          * Called once at the start of the activity.
@@ -128,7 +125,7 @@ class activity_actor
 };
 
 void serialize( const cata::clone_ptr<activity_actor> &actor, JsonOut &jsout );
-void deserialize( cata::clone_ptr<activity_actor> &actor, JsonIn &jsin );
+void deserialize( cata::clone_ptr<activity_actor> &actor, const JsonValue &jsin );
 
 namespace activity_actors
 {

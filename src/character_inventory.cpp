@@ -1,13 +1,50 @@
+#include <algorithm>
+#include <bitset>
+#include <climits>
+#include <functional>
+#include <iterator>
+#include <limits>
+#include <list>
+#include <map>
+#include <memory>
+#include <optional>
+#include <ostream>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "activity_actor_definitions.h"
 #include "activity_handlers.h"
 #include "catacharset.h"
 #include "character.h"
+#include "character_attire.h"
+#include "debug.h"
+#include "enums.h"
 #include "flag.h"
 #include "inventory.h"
+#include "item.h"
+#include "item_contents.h"
+#include "item_location.h"
+#include "item_pocket.h"
+#include "itype.h"
+#include "iuse.h"
 #include "iuse_actor.h"
+#include "line.h"
 #include "map.h"
+#include "map_selector.h"
 #include "options.h"
+#include "pimpl.h"
+#include "pocket_type.h"
+#include "point.h"
+#include "ret_val.h"
+#include "string_formatter.h"
+#include "translations.h"
+#include "type_id.h"
+#include "ui.h"
+#include "units_fwd.h"
 #include "vehicle.h"
+#include "visitable.h"
 #include "vpart_position.h"
 
 void Character::handle_contents_changed( const std::vector<item_location> &containers )
@@ -66,7 +103,7 @@ void Character::handle_contents_changed( const std::vector<item_location> &conta
         loc->on_contents_changed();
         const bool handle_drop = loc.where() != item_location::type::map && !is_wielding( *loc );
         bool drop_unhandled = false;
-        for( item_pocket *const pocket : loc->get_all_contained_pockets().value() ) {
+        for( item_pocket *const pocket : loc->get_all_contained_pockets() ) {
             if( pocket && !pocket->sealed() ) {
                 // pockets are unsealed but on_contents_changed is not called
                 // in contents_change_handler::unseal_pocket_containing
@@ -89,7 +126,7 @@ void Character::handle_contents_changed( const std::vector<item_location> &conta
         if( loc.has_parent() ) {
             item_location parent_loc = loc.parent_item();
             item_loc_with_depth parent( parent_loc );
-            item_pocket *const pocket = parent_loc->contained_where( *loc );
+            item_pocket *const pocket = loc.parent_pocket();
             pocket->unseal();
             bool exists = false;
             auto it = sorted_containers.lower_bound( parent );
@@ -110,12 +147,12 @@ void Character::handle_contents_changed( const std::vector<item_location> &conta
             add_msg_player_or_npc(
                 _( "To avoid spilling its contents, you set your %1$s on the %2$s." ),
                 _( "To avoid spilling its contents, <npcname> sets their %1$s on the %2$s." ),
-                loc->display_name(), m.name( pos() )
+                loc->display_name(), m.name( pos_bub() )
             );
             item it_copy( *loc );
             loc.remove_item();
             // target item of `loc` is invalidated and should not be used from now on
-            m.add_item_or_charges( pos(), it_copy );
+            m.add_item_or_charges( pos_bub(), it_copy );
         }
     }
 }
@@ -145,21 +182,23 @@ units::volume Character::max_single_item_volume() const
     return std::max( weapon.max_containable_volume(), worn.max_single_item_volume() );
 }
 
-std::pair<item_location, item_pocket *> Character::best_pocket( const item &it, const item *avoid )
+std::pair<item_location, item_pocket *> Character::best_pocket( const item &it, const item *avoid,
+        bool ignore_settings )
 {
     item_location weapon_loc( *this, &weapon );
     std::pair<item_location, item_pocket *> ret = std::make_pair( item_location(), nullptr );
     if( &weapon != &it && &weapon != avoid ) {
-        ret = weapon.best_pocket( it, weapon_loc, avoid );
+        ret = weapon.best_pocket( it, weapon_loc, avoid, false, ignore_settings );
     }
-    worn.best_pocket( *this, it, avoid, ret );
+    worn.best_pocket( *this, it, avoid, ret, ignore_settings );
     return ret;
 }
 
-item *Character::try_add( item it, const item *avoid, const item *original_inventory_item,
-                          const bool allow_wield )
+item_location Character::try_add( item it, const item *avoid, const item *original_inventory_item,
+                                  const bool allow_wield, bool ignore_pkt_settings )
 {
     invalidate_inventory_validity_cache();
+    invalidate_leak_level_cache();
     itype_id item_type_id = it.typeId();
     last_item = item_type_id;
 
@@ -173,50 +212,209 @@ item *Character::try_add( item it, const item *avoid, const item *original_inven
             break;
         }
     }
-    std::pair<item_location, item_pocket *> pocket = best_pocket( it, avoid );
-    item *ret = nullptr;
+    std::pair<item_location, item_pocket *> pocket = best_pocket( it, avoid, ignore_pkt_settings );
+    item_location ret = item_location::nowhere;
+    bool wielded = false;
     if( pocket.second == nullptr ) {
         if( !has_weapon() && allow_wield && wield( it ) ) {
-            ret = &weapon;
+            ret = item_location( *this, &weapon );
+            wielded = true;
         } else {
-            return nullptr;
+            return ret;
         }
     } else {
         // this will set ret to either it, or to stack where it was placed
-        pocket.second->add( it, &ret );
-        if( !keep_invlet && ( !it.count_by_charges() || it.charges == ret->charges ) ) {
-            inv->update_invlet( *ret, true, original_inventory_item );
+        item *newit = nullptr;
+        pocket.second->add( it, &newit );
+        if( !keep_invlet && ( !it.count_by_charges() || it.charges == newit->charges ) ) {
+            inv->update_invlet( *newit, true, original_inventory_item );
         }
         pocket.first.on_contents_changed();
         pocket.second->on_contents_changed();
+        ret = item_location( pocket.first, newit );
     }
 
     if( keep_invlet ) {
         ret->invlet = it.invlet;
     }
-    ret->on_pickup( *this );
+    if( !wielded ) {
+        ret->on_pickup( *this );
+    }
     cached_info.erase( "reloadables" );
     return ret;
 }
 
-item &Character::i_add( item it, bool /* should_stack */, const item *avoid,
-                        const item *original_inventory_item, const bool allow_drop,
-                        const bool allow_wield )
+item_location Character::try_add( item it, int &copies_remaining, const item *avoid,
+                                  const item *original_inventory_item,
+                                  const bool allow_wield, bool ignore_pkt_settings )
 {
     invalidate_inventory_validity_cache();
-    item *added = try_add( it, avoid, original_inventory_item, allow_wield );
-    if( added == nullptr ) {
+    invalidate_leak_level_cache();
+    itype_id item_type_id = it.typeId();
+    last_item = item_type_id;
+
+    // if there's a desired invlet for this item type, try to use it
+    char invlet = 0;
+    const invlets_bitset cur_inv = allocated_invlets();
+    for( const auto &iter : inv->assigned_invlet ) {
+        if( iter.second == item_type_id && !cur_inv[iter.first] ) {
+            invlet = iter.first;
+            break;
+        }
+    }
+
+    //item copy for test can contain
+    item temp_it = item( it );
+    temp_it.charges = 1;
+
+    item_location first_item_added;
+
+    std::pair<item_location, item_pocket *> pocket;
+    while( copies_remaining > 0 ) {
+        pocket = best_pocket( it, avoid, ignore_pkt_settings );
+        if( pocket.second == nullptr ) {
+            break;
+        }
+
+        int max_copies;
+        if( !temp_it.is_null() ) {
+            const int pocket_max_copies = pocket.second->remaining_capacity_for_item( temp_it );
+            const int parent_max_copies = !pocket.first.has_parent() ? INT_MAX :
+                                          !pocket.first.parents_can_contain_recursive( &temp_it ).success() ? 0 :
+                                          pocket.first.max_charges_by_parent_recursive( temp_it ).value();
+            max_copies = std::min( { copies_remaining, pocket_max_copies, parent_max_copies } );
+        } else {
+            max_copies = copies_remaining;
+        }
+
+        std::vector<item *>newits;
+        pocket.second->add( it, max_copies, newits );
+
+        if( newits.empty() ) {
+            // Failed to insert into best pocket - break out to prevent infinite loop.
+            break;
+        }
+
+        // Give invlet to the first item created.
+        if( !first_item_added ) {
+            first_item_added = item_location( pocket.first, newits.front() );
+            if( invlet ) {
+                first_item_added->invlet = invlet;
+            }
+        }
+        if( !invlet ) {
+            inv->update_invlet( *newits.front(), true, original_inventory_item );
+        }
+
+        copies_remaining -= max_copies;
+
+        for( item *it : newits ) {
+            it->on_pickup( *this );
+        }
+        pocket.first.on_contents_changed();
+        pocket.second->on_contents_changed();
+    }
+
+    if( copies_remaining > 0 && allow_wield && !has_weapon() && wield( it ) ) {
+        copies_remaining--;
+        if( !first_item_added ) {
+            first_item_added = item_location( *this, &weapon );
+        }
+    }
+    if( first_item_added ) {
+        cached_info.erase( "reloadables" );
+    }
+    return first_item_added;
+}
+
+item_location Character::i_add( item it, bool /* should_stack */, const item *avoid,
+                                const item *original_inventory_item, const bool allow_drop,
+                                const bool allow_wield, bool ignore_pkt_settings )
+{
+    invalidate_inventory_validity_cache();
+    invalidate_leak_level_cache();
+    item_location added = try_add( it, avoid, original_inventory_item, allow_wield,
+                                   ignore_pkt_settings );
+    if( added == item_location::nowhere ) {
         if( !allow_wield || !wield( it ) ) {
             if( allow_drop ) {
-                return get_map().add_item_or_charges( pos(), it );
+                return item_location( map_cursor( pos_abs() ), &get_map().add_item_or_charges( pos_bub(),
+                                      it ) );
             } else {
-                return null_item_reference();
+                return added;
             }
         } else {
-            return weapon;
+            return item_location( *this, &weapon );
         }
     } else {
-        return *added;
+        return added;
+    }
+}
+
+item_location Character::i_add( item it, int &copies_remaining,
+                                bool /* should_stack */, const item *avoid,
+                                const item *original_inventory_item, const bool allow_drop,
+                                const bool allow_wield, bool ignore_pkt_settings )
+{
+    if( it.count_by_charges() ) {
+        it.charges = copies_remaining;
+        copies_remaining = 0;
+        return i_add( it, true, avoid, original_inventory_item,
+                      allow_drop, allow_wield, ignore_pkt_settings );
+    }
+    invalidate_inventory_validity_cache();
+    invalidate_leak_level_cache();
+    item_location added = try_add( it, copies_remaining, avoid, original_inventory_item, allow_wield,
+                                   ignore_pkt_settings );
+    if( copies_remaining > 0 ) {
+        if( allow_wield && wield( it ) ) {
+            copies_remaining--;
+            added = added ? added : item_location( *this, &weapon );
+        }
+        if( allow_drop && copies_remaining > 0 ) {
+            item map_added = get_map().add_item_or_charges( pos_bub(), it, copies_remaining );
+            added = added ? added : item_location( map_cursor( pos_abs() ), &map_added );
+        }
+    }
+    return added;
+}
+
+ret_val<item_location> Character::i_add_or_fill( item &it, bool should_stack, const item *avoid,
+        const item *original_inventory_item, const bool allow_drop,
+        const bool allow_wield, bool ignore_pkt_settings )
+{
+    item_location loc = item_location::nowhere;
+    bool success = false;
+    if( it.count_by_charges() && it.charges >= 2 && !ignore_pkt_settings ) {
+        const int last_charges = it.charges;
+        int new_charge = last_charges;
+        this->worn.add_stash( *this, it, new_charge, false );
+
+        if( new_charge < last_charges ) {
+            it.charges = new_charge;
+            success = true;
+        } else {
+            success = false;
+        }
+        if( new_charge >= 1 ) {
+            if( !allow_wield || !wield( it ) ) {
+                if( allow_drop ) {
+                    loc = item_location( map_cursor( pos_abs() ), &get_map().add_item_or_charges( pos_bub(),
+                                         it ) );
+                }
+            } else {
+                loc = item_location( *this, &weapon );
+            }
+        }
+        if( success ) {
+            return ret_val<item_location>::make_success( loc );
+        } else {
+            return ret_val<item_location>::make_failure( loc );
+        }
+    } else {
+        loc = i_add( it, should_stack, avoid, original_inventory_item, allow_drop, allow_wield,
+                     ignore_pkt_settings );
+        return ret_val<item_location>::make_success( loc );
     }
 }
 
@@ -247,12 +445,13 @@ item Character::i_rem( const item *it )
         debugmsg( "did not found item %s to remove it!", it->tname() );
         return item();
     }
+    invalidate_leak_level_cache();
     return tmp.front();
 }
 
 void Character::i_rem_keep_contents( const item *const it )
 {
-    i_rem( it ).spill_contents( pos() );
+    i_rem( it ).spill_contents( pos_bub() );
 }
 
 bool Character::i_add_or_drop( item &it, int qty, const item *avoid,
@@ -266,11 +465,29 @@ bool Character::i_add_or_drop( item &it, int qty, const item *avoid,
     for( int i = 0; i < qty; ++i ) {
         drop |= !can_pickWeight( it, !get_option<bool>( "DANGEROUS_PICKUPS" ) ) || !can_pickVolume( it );
         if( drop ) {
-            retval &= !here.add_item_or_charges( pos(), it ).is_null();
+            retval &= !here.add_item_or_charges( pos_bub(), it ).is_null();
+            if( !retval ) {
+                // No need to loop now, we already knew that there isn't enough room for the item.
+                break;
+            }
         } else if( add ) {
             i_add( it, true, avoid,
                    original_inventory_item, /*allow_drop=*/true, /*allow_wield=*/!has_wield_conflicts( it ) );
+        } else {
+            retval = false;
+            break;
         }
+    }
+
+    return retval;
+}
+
+bool Character::i_drop_at( item &it, int qty )
+{
+    bool retval = true;
+    map &here = get_map();
+    for( int i = 0; i < qty; ++i ) {
+        retval &= !here.add_item_or_charges( pos_bub(), it ).is_null();
     }
 
     return retval;
@@ -278,7 +495,7 @@ bool Character::i_add_or_drop( item &it, int qty, const item *avoid,
 
 static void recur_internal_locations( item_location parent, std::vector<item_location> &list )
 {
-    for( item *it : parent->all_items_top( item_pocket::pocket_type::CONTAINER ) ) {
+    for( item *it : parent->all_items_top( pocket_type::CONTAINER ) ) {
         item_location child( parent, it );
         recur_internal_locations( child, list );
     }
@@ -312,6 +529,7 @@ std::vector<item_location> Character::all_items_loc()
 std::vector<item_location> outfit::top_items_loc( Character &guy )
 {
     std::vector<item_location> ret;
+    ret.reserve( worn.size() );
     for( item &worn_it : worn ) {
         item_location worn_loc( guy, &worn_it );
         ret.push_back( worn_loc );
@@ -324,7 +542,7 @@ std::vector<item_location> Character::top_items_loc()
     return worn.top_items_loc( *this );
 }
 
-item *Character::invlet_to_item( const int linvlet )
+item *Character::invlet_to_item( const int linvlet ) const
 {
     // Invlets may come from curses, which may also return any kind of key codes, those being
     // of type int and they can become valid, but different characters when casted to char.
@@ -355,7 +573,7 @@ int Character::get_item_position( const item *it ) const
         return -1;
     }
 
-    cata::optional<int> pos = worn.get_item_position( *it );
+    std::optional<int> pos = worn.get_item_position( *it );
     if( pos ) {
         return worn_position_to_index( *pos );
     }
@@ -363,43 +581,43 @@ int Character::get_item_position( const item *it ) const
     return inv->position_by_item( it );
 }
 
-void Character::drop( item_location loc, const tripoint &where )
+void Character::drop( item_location loc, const tripoint_bub_ms &where )
 {
     drop( { std::make_pair( loc, loc->count() ) }, where );
     invalidate_inventory_validity_cache();
 }
 
-void Character::drop( const drop_locations &what, const tripoint &target,
+void Character::drop( const drop_locations &what, const tripoint_bub_ms &target,
                       bool stash )
 {
     if( what.empty() ) {
         return;
     }
-
-    const cata::optional<vpart_reference> vp = get_map().veh_at(
-                target ).part_with_feature( "CARGO", false );
-    if( rl_dist( pos(), target ) > 1 || !( stash || get_map().can_put_items( target ) )
+    invalidate_leak_level_cache();
+    const std::optional<vpart_reference> vp = get_map().veh_at( target ).cargo();
+    if( rl_dist( pos_bub(), target ) > 1 || !( stash || get_map().can_put_items( target ) )
         || ( vp.has_value() && vp->part().is_cleaner_on() ) ) {
         add_msg_player_or_npc( m_info, _( "You can't place items here!" ),
                                _( "<npcname> can't place items here!" ) );
         return;
     }
 
-    const tripoint placement = target - pos();
+    const tripoint_rel_ms placement = target - pos_bub();
     std::vector<drop_or_stash_item_info> items;
     for( drop_location item_pair : what ) {
+        if( is_avatar() && vp.has_value() && item_pair.first->is_bucket_nonempty() &&
+            !query_yn( _( "The %s would spill if stored there.  Remove its contents first?" ),
+                       item_pair.first->tname() ) ) {
+            continue;
+        }
         if( can_drop( *item_pair.first ).success() ) {
             items.emplace_back( item_pair.first, item_pair.second );
         }
     }
     if( stash ) {
-        assign_activity( player_activity( stash_activity_actor(
-                                              items, placement
-                                          ) ) );
+        assign_activity( stash_activity_actor( items, placement ) );
     } else {
-        assign_activity( player_activity( drop_activity_actor(
-                                              items, placement, /*force_ground=*/false
-                                          ) ) );
+        assign_activity( drop_activity_actor( items, placement, /* force_ground = */ false ) );
     }
 }
 
@@ -408,16 +626,19 @@ void Character::pick_up( const drop_locations &what )
     if( what.empty() ) {
         return;
     }
-
+    invalidate_leak_level_cache();
     //todo: refactor pickup_activity_actor to just use drop_locations, also rename drop_locations
     std::vector<item_location> items;
     std::vector<int> quantities;
+    items.reserve( what.size() );
+    quantities.reserve( what.size() );
     for( const drop_location &dl : what ) {
         items.emplace_back( dl.first );
         quantities.emplace_back( dl.second );
     }
 
-    assign_activity( player_activity( pickup_activity_actor( items, quantities, pos() ) ) );
+    last_item = item( *items.back() ).typeId();
+    assign_activity( pickup_activity_actor( items, quantities, pos_bub(), false ) );
 }
 
 invlets_bitset Character::allocated_invlets() const
@@ -441,12 +662,12 @@ bool Character::has_active_item( const itype_id &id ) const
     } );
 }
 
-ret_val<bool> Character::can_drop( const item &it ) const
+ret_val<void> Character::can_drop( const item &it ) const
 {
-    if( it.has_flag( flag_NO_UNWIELD ) ) {
-        return ret_val<bool>::make_failure( _( "You cannot drop your %s." ), it.tname() );
+    if( it.has_flag( flag_NO_UNWIELD ) || it.has_flag( flag_INTEGRATED ) ) {
+        return ret_val<void>::make_failure( _( "You cannot drop your %s." ), it.tname() );
     }
-    return ret_val<bool>::make_success();
+    return ret_val<void>::make_success();
 }
 
 void Character::drop_invalid_inventory()
@@ -459,7 +680,7 @@ void Character::drop_invalid_inventory()
         const item &it = stack->front();
         if( it.made_of( phase_id::LIQUID ) ) {
             dropped_liquid = true;
-            get_map().add_item_or_charges( pos(), it );
+            get_map().add_item_or_charges( pos_bub(), it );
             // must be last
             i_rem( &it );
         }
@@ -468,24 +689,55 @@ void Character::drop_invalid_inventory()
         add_msg_if_player( m_bad, _( "Liquid from your inventory has leaked onto the ground." ) );
     }
 
-    weapon.overflow( pos() );
-    worn.overflow( pos() );
-
+    item_location weap = get_wielded_item();
+    if( weap ) {
+        weap.overflow();
+    }
+    worn.overflow( *this );
     cache_inventory_is_valid = true;
 }
 
 void outfit::holster_opts( std::vector<dispose_option> &opts, item_location obj, Character &guy )
 {
 
-    for( auto &e : worn ) {
-        if( e.can_holster( *obj ) ) {
+    for( item &e : worn ) {
+        // check for attachable subpockets first (the parent item may be defined as a holster)
+        if( e.get_contents().has_additional_pockets() && e.can_contain( *obj ).success() ) {
+            opts.emplace_back( dispose_option{
+                string_format( _( "Store in %s" ), e.tname() ), true, e.invlet,
+                guy.item_store_cost( *obj, e, false, e.insert_cost( *obj ) ),
+                [&guy, &e, obj] {
+                    item &it = *item_location( obj );
+                    guy.store( e, it, false, e.insert_cost( it ), pocket_type::CONTAINER, true );
+                    return !guy.has_item( it );
+                }
+            } );
+            int pkt_idx = 0;
+            for( const item *it : e.get_contents().get_added_pockets() ) {
+                item_pocket *con = const_cast<item_pocket *>( e.get_contents().get_added_pocket( pkt_idx++ ) );
+                if( !con || !con->can_contain( *obj ).success() ) {
+                    continue;
+                }
+                opts.emplace_back( dispose_option{
+                    string_format( "  >%s", it->tname() ), true, it->invlet,
+                    guy.item_store_cost( *obj, *it, false, it->insert_cost( *obj ) ),
+                    [&guy, it, con, obj] {
+                        item &i = *item_location( obj );
+                        guy.store( con, i, false, it->insert_cost( i ) );
+                        return !guy.has_item( i );
+                    }
+                } );
+            }
+        } else if( e.can_holster( *obj ) ) {
             const holster_actor *ptr = dynamic_cast<const holster_actor *>
                                        ( e.type->get_use( "holster" )->get_actor_ptr() );
             opts.emplace_back( dispose_option{
                 string_format( _( "Store in %s" ), e.tname() ), true, e.invlet,
                 guy.item_store_cost( *obj, e, false, e.insert_cost( *obj ) ),
-                [&guy, ptr, &e, &obj] {
-                    return ptr->store( guy, e, *obj );
+                [&guy, ptr, &e, obj] {
+                    // *obj by itself attempts to use the const version of the operator (in gcc9),
+                    // so construct a new item_location which allows using the non-const version
+                    return ptr->store( guy, e, *item_location( obj ) );
                 }
             } );
         }
@@ -510,7 +762,7 @@ bool Character::dispose_item( item_location &&obj, const std::string &prompt )
                 return false;
             }
 
-            moves -= item_handling_cost( *obj );
+            mod_moves( -item_handling_cost( *obj ) );
             this->i_add( *obj, true, &*obj, &*obj );
             obj.remove_item();
             return true;
@@ -543,10 +795,10 @@ bool Character::dispose_item( item_location &&obj, const std::string &prompt )
     worn.holster_opts( opts, obj, *this );
 
     int w = utf8_width( menu.text, true ) + 4;
-    for( const auto &e : opts ) {
+    for( const dispose_option &e : opts ) {
         w = std::max( w, utf8_width( e.prompt, true ) + 4 );
     }
-    for( auto &e : opts ) {
+    for( dispose_option &e : opts ) {
         e.prompt += std::string( w - utf8_width( e.prompt, true ), ' ' );
     }
 
@@ -554,7 +806,7 @@ bool Character::dispose_item( item_location &&obj, const std::string &prompt )
     menu.text += std::string( w + 2 - utf8_width( menu.text, true ), ' ' );
     menu.text += _( " | Moves  " );
 
-    for( const auto &e : opts ) {
+    for( const dispose_option &e : opts ) {
         menu.addentry( -1, e.enabled, e.invlet, string_format( e.enabled ? "%s | %-7d" : "%s |",
                        e.prompt, e.moves ) );
     }

@@ -2,28 +2,20 @@
 #ifndef CATA_SRC_CALENDAR_H
 #define CATA_SRC_CALENDAR_H
 
-#include <iosfwd>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
+#include <climits>
 
 #include "units_fwd.h"
 
-class JsonIn;
 class JsonOut;
 class JsonValue;
-struct lat_long;
 struct rl_vec2d;
 class time_duration;
 class time_point;
 template<typename T> struct enum_traits;
-
-namespace cata
-{
-template<typename T>
-class optional;
-} // namespace cata
-
 
 /** Real world seasons */
 enum season_type {
@@ -59,6 +51,22 @@ enum moon_phase {
     MOON_WANING_CRESCENT,
     /** Not a valid moon phase, but can be used for iterating through enum */
     MOON_PHASE_MAX
+};
+
+enum class time_accuracy {
+    /** No accuracy, no idea what time it is **/
+    NONE = 0,
+    /** Estimated time, can see the sky **/
+    PARTIAL = 1,
+    /** Full accuracy, using a timekeeping device **/
+    FULL = 2,
+    /** Unused, only for string conversions **/
+    NUM_TIME_ACCURACY
+};
+
+template<>
+struct enum_traits<time_accuracy> {
+    static constexpr time_accuracy last = time_accuracy::NUM_TIME_ACCURACY;
 };
 
 /**
@@ -111,6 +119,8 @@ time_duration year_length();
 /** @returns Time of a season (configured in current world settings) */
 time_duration season_length();
 void set_season_length( int dur );
+
+void set_location( float latitude, float longitude );
 
 /// @returns relative length of game season to real life season.
 float season_ratio();
@@ -354,27 +364,27 @@ bool x_in_y( const time_duration &a, const time_duration &b );
  * `time_duration::from_*` function.
  */
 /**@{*/
-constexpr time_duration operator"" _turns( const unsigned long long int v )
+constexpr time_duration operator""_turns( const unsigned long long int v )
 {
     return time_duration::from_turns( v );
 }
-constexpr time_duration operator"" _seconds( const unsigned long long int v )
+constexpr time_duration operator""_seconds( const unsigned long long int v )
 {
     return time_duration::from_seconds( v );
 }
-constexpr time_duration operator"" _minutes( const unsigned long long int v )
+constexpr time_duration operator""_minutes( const unsigned long long int v )
 {
     return time_duration::from_minutes( v );
 }
-constexpr time_duration operator"" _hours( const unsigned long long int v )
+constexpr time_duration operator""_hours( const unsigned long long int v )
 {
     return time_duration::from_hours( v );
 }
-constexpr time_duration operator"" _days( const unsigned long long int v )
+constexpr time_duration operator""_days( const unsigned long long int v )
 {
     return time_duration::from_days( v );
 }
-constexpr time_duration operator"" _weeks( const unsigned long long int v )
+constexpr time_duration operator""_weeks( const unsigned long long int v )
 {
     return time_duration::from_weeks( v );
 }
@@ -426,7 +436,7 @@ std::pair<int, clipped_unit> clipped_time( const time_duration &d );
  * @param align none, right, or compact.
  */
 std::string to_string_clipped( const time_duration &d,
-                               const clipped_align align = clipped_align::none );
+                               clipped_align align = clipped_align::none );
 /**
  * Returns approximate duration.
  * @param verbose If true, 'less than' and 'more than' will be printed instead of '<' and '>' respectively.
@@ -457,7 +467,6 @@ class time_point
         // TODO: make private
         explicit constexpr time_point( const int t ) : turn_( t ) { }
 
-    public:
         // TODO: remove this, nobody should need it, one should use a constant `time_point`
         // (representing turn 0) and a `time_duration` instead.
         static constexpr time_point from_turn( const int t ) {
@@ -531,6 +540,11 @@ constexpr time_point before_time_starts = time_point::from_turn( -1 );
 
 constexpr time_point turn_zero = time_point::from_turn( 0 );
 
+/**
+ * Largest possible time point. About 69 years after turn_zero
+ */
+constexpr time_point turn_max = time_point::from_turn( INT_MAX );
+
 } // namespace calendar
 
 inline time_duration time_past_midnight( const time_point &p )
@@ -569,6 +583,10 @@ season_type season_of_year( const time_point &p );
 std::string to_string( const time_point &p );
 /// @returns The time point formatted to be shown to the player. Contains only the time of day, not the year, day or season.
 std::string to_string_time_of_day( const time_point &p );
+/** Time approximation based on the player's timekeeping capability, formatted for diary pages **/
+std::string get_diary_time_str( const time_point &turn, time_accuracy acc );
+/** Time approximation based on the player's timekeeping capability, formatted for diary pages **/
+std::string get_diary_time_since_str( const time_duration &turn_diff, time_accuracy acc );
 /** Returns the default duration of a lunar month (duration between syzygies) */
 time_duration lunar_month();
 /** Returns the current phase of the moon. */
@@ -581,6 +599,8 @@ time_point sunset( const time_point &p );
 time_point daylight_time( const time_point &p );
 /** Returns the time it gets dark based on sunset */
 time_point night_time( const time_point &p );
+/** Returns the time when the clock displays 12:00 */
+time_point noon( const time_point &p );
 /** Returns true if it's currently night time - after dusk and before dawn. */
 bool is_night( const time_point &p );
 /** Returns true if it's currently day time - after dawn and before dusk. */
@@ -590,26 +610,32 @@ bool is_dusk( const time_point &p );
 /** Returns true if it's currently dawn - between sunrise and twilight_duration after sunrise. */
 bool is_dawn( const time_point &p );
 /** How much light is provided in full daylight */
-double default_daylight_level();
+float default_daylight_level();
+/* Irradiance (W/m2) on clear day when sun is at 90 degrees */
+float max_sun_irradiance();
 /** Returns the current sunlight.
  *  Based entirely on astronomical circumstances; does not account for e.g.
  *  weather.
  *  For most situations you actually want to call the below function which also
  *  includes moonlight. */
 float sun_light_at( const time_point &p );
+
+/* Returns sun irradiance (W/m2) on a flat surface*/
+float sun_irradiance( const time_point &p );
+
 /** Returns the current sunlight plus moonlight level.
  *  Based entirely on astronomical circumstances; does not account for e.g.
  *  weather. */
 float sun_moon_light_at( const time_point &p );
 /** How much light is provided at the solar noon nearest to given time */
-double sun_moon_light_at_noon_near( const time_point &p );
+float sun_moon_light_at_noon_near( const time_point &p );
 
 std::pair<units::angle, units::angle> sun_azimuth_altitude( time_point );
 
 /** Returns the offset by which a ray of sunlight would move when shifting down
  * one z-level, or nullopt if the sun is below the horizon.
  */
-cata::optional<rl_vec2d> sunlight_angle( const time_point & );
+std::optional<rl_vec2d> sunlight_angle( const time_point & );
 
 enum class weekdays : int {
     SUNDAY = 0,

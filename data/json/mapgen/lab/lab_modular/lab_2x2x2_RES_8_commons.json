@@ -3,7 +3,6 @@
     "method": "json",
     "om_terrain": [ "lab_res_8_NWD" ],
     "type": "mapgen",
-    "weight": 200,
     "object": {
       "fill_ter": "t_linoleum_white",
       "rows": [
@@ -111,7 +110,7 @@
   {
     "type": "mapgen",
     "method": "json",
-    "//": "combines 2 5x5 mexican restaurant areas and a 6x6 kitchen.",
+    "//": "combines 2 5x5 Mexican restaurant areas and a 6x6 kitchen.",
     "nested_mapgen_id": "lab_17x17_shop",
     "object": {
       "mapgensize": [ 17, 17 ],
@@ -125,7 +124,7 @@
   {
     "type": "mapgen",
     "method": "json",
-    "//": "combines 2 5x5 mexican restaurant areas and a 6x6 kitchen.",
+    "//": "combines 2 5x5 Mexican restaurant areas and a 6x6 kitchen.",
     "nested_mapgen_id": "lab_17x17_shop_2",
     "object": {
       "mapgensize": [ 17, 17 ],
@@ -196,7 +195,6 @@
     "method": "json",
     "om_terrain": [ "lab_res_8_NED" ],
     "type": "mapgen",
-    "weight": 200,
     "object": {
       "fill_ter": "t_linoleum_white",
       "rows": [
@@ -252,7 +250,6 @@
     "method": "json",
     "om_terrain": [ "lab_res_8_SWD" ],
     "type": "mapgen",
-    "weight": 200,
     "object": {
       "fill_ter": "t_linoleum_white",
       "rows": [
@@ -306,7 +303,6 @@
     "method": "json",
     "om_terrain": [ "lab_res_8_SED" ],
     "type": "mapgen",
-    "weight": 200,
     "object": {
       "fill_ter": "t_linoleum_white",
       "rows": [

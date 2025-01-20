@@ -11,6 +11,7 @@
 #include "json.h"
 #include "localized_comparator.h"
 #include "enums.h"
+#include "options.h"
 
 const float book_proficiency_bonus::default_time_factor = 0.5f;
 const float book_proficiency_bonus::default_fail_factor = 0.5f;
@@ -19,6 +20,7 @@ const bool book_proficiency_bonus::default_include_prereqs = true;
 namespace
 {
 generic_factory<proficiency> proficiency_factory( "proficiency" );
+generic_factory<proficiency_category> proficiency_category_factory( "proficiency category" );
 } // namespace
 
 template<>
@@ -33,6 +35,18 @@ bool proficiency_id::is_valid() const
     return proficiency_factory.is_valid( *this );
 }
 
+template<>
+const proficiency_category &proficiency_category_id::obj() const
+{
+    return proficiency_category_factory.obj( *this );
+}
+
+template<>
+bool proficiency_category_id::is_valid() const
+{
+    return proficiency_category_factory.is_valid( *this );
+}
+
 namespace io
 {
 template<>
@@ -44,6 +58,7 @@ std::string enum_to_string<proficiency_bonus_type>( const proficiency_bonus_type
         case proficiency_bonus_type::dexterity: return "dexterity";
         case proficiency_bonus_type::intelligence: return "intelligence";
         case proficiency_bonus_type::perception: return "perception";
+        case proficiency_bonus_type::stamina: return "stamina";
         case proficiency_bonus_type::last: break;
         // *INDENT-ON*
     }
@@ -58,6 +73,12 @@ void proficiency::load_proficiencies( const JsonObject &jo, const std::string &s
     proficiency_factory.load( jo, src );
 }
 
+void proficiency_category::load_proficiency_categories( const JsonObject &jo,
+        const std::string &src )
+{
+    proficiency_category_factory.load( jo, src );
+}
+
 void proficiency_bonus::deserialize( const JsonObject &jo )
 {
     mandatory( jo, false, "type", type );
@@ -69,21 +90,41 @@ void proficiency::reset()
     proficiency_factory.reset();
 }
 
-void proficiency::load( const JsonObject &jo, const std::string & )
+void proficiency_category::reset()
+{
+    proficiency_category_factory.reset();
+}
+
+void proficiency::load( const JsonObject &jo, const std::string_view )
 {
     mandatory( jo, was_loaded, "name", _name );
     mandatory( jo, was_loaded, "description", _description );
     mandatory( jo, was_loaded, "can_learn", _can_learn );
+    mandatory( jo, was_loaded, "category", _category );
 
     optional( jo, was_loaded, "default_time_multiplier", _default_time_multiplier );
-    optional( jo, was_loaded, "default_fail_multiplier", _default_fail_multiplier );
+    optional( jo, was_loaded, "default_skill_penalty", _default_skill_penalty );
     optional( jo, was_loaded, "default_weakpoint_bonus", _default_weakpoint_bonus );
     optional( jo, was_loaded, "default_weakpoint_penalty", _default_weakpoint_penalty );
     optional( jo, was_loaded, "time_to_learn", _time_to_learn );
     optional( jo, was_loaded, "required_proficiencies", _required );
     optional( jo, was_loaded, "ignore_focus", _ignore_focus );
+    optional( jo, was_loaded, "teachable", _teachable, true );
 
     optional( jo, was_loaded, "bonuses", _bonuses );
+
+    // TODO: Remove at some point
+    if( jo.has_float( "default_fail_multiplier" ) ) {
+        debugmsg( "Proficiency %s uses 'default_fail_multiplier' instead of 'default_skill_penalty'!",
+                  id.c_str() );
+        _default_skill_penalty = jo.get_float( "default_fail_multiplier" ) - 1.f;
+    }
+}
+
+void proficiency_category::load( const JsonObject &jo, const std::string_view )
+{
+    mandatory( jo, was_loaded, "name", _name );
+    mandatory( jo, was_loaded, "description", _description );
 }
 
 const std::vector<proficiency> &proficiency::get_all()
@@ -91,9 +132,19 @@ const std::vector<proficiency> &proficiency::get_all()
     return proficiency_factory.get_all();
 }
 
+const std::vector<proficiency_category> &proficiency_category::get_all()
+{
+    return proficiency_category_factory.get_all();
+}
+
 bool proficiency::can_learn() const
 {
-    return _can_learn;
+    if( _can_learn ) {
+        const double scaling = get_option<float>( "PROFICIENCY_TRAINING_SPEED" );
+        return scaling != 0.0;
+    } else {
+        return false;
+    }
 }
 
 bool proficiency::ignore_focus() const
@@ -101,9 +152,19 @@ bool proficiency::ignore_focus() const
     return _ignore_focus;
 }
 
+bool proficiency::is_teachable() const
+{
+    return _teachable;
+}
+
 proficiency_id proficiency::prof_id() const
 {
     return id;
+}
+
+proficiency_category_id proficiency::prof_category() const
+{
+    return _category;
 }
 
 std::string proficiency::name() const
@@ -121,9 +182,9 @@ float proficiency::default_time_multiplier() const
     return _default_time_multiplier;
 }
 
-float proficiency::default_fail_multiplier() const
+float proficiency::default_skill_penalty() const
 {
-    return _default_fail_multiplier;
+    return _default_skill_penalty;
 }
 
 float proficiency::default_weakpoint_bonus() const
@@ -136,10 +197,14 @@ float proficiency::default_weakpoint_penalty() const
     return _default_weakpoint_penalty;
 }
 
-
 time_duration proficiency::time_to_learn() const
 {
-    return _time_to_learn;
+    const double scaling = get_option<float>( "PROFICIENCY_TRAINING_SPEED" );
+    if( scaling != 1.0 && scaling != 0.0 ) {
+        return _time_to_learn / scaling;
+    } else {
+        return _time_to_learn;
+    }
 }
 
 std::set<proficiency_id> proficiency::required_proficiencies() const
@@ -154,6 +219,22 @@ std::vector<proficiency_bonus> proficiency::get_bonuses( const std::string &cate
         return std::vector<proficiency_bonus>();
     }
     return bonus_it->second;
+}
+
+std::optional<float> proficiency::bonus_for( const std::string &category,
+        proficiency_bonus_type type ) const
+{
+    auto bonus_it = _bonuses.find( category );
+    if( bonus_it == _bonuses.end() ) {
+        return std::nullopt;
+    }
+    for( const proficiency_bonus &b : bonus_it->second ) {
+        if( b.type == type ) {
+            return b.value;
+        }
+    }
+
+    return std::nullopt;
 }
 
 learning_proficiency &proficiency_set::fetch_learning( const proficiency_id &target )
@@ -181,6 +262,7 @@ std::vector<display_proficiency> proficiency_set::display() const
         sorted_known.emplace_back( cur->name(), cur );
     }
 
+    sorted_learning.reserve( learning.size() );
     for( const learning_proficiency &cur : learning ) {
         sorted_learning.emplace_back( cur.id->name(), cur.id );
     }
@@ -222,7 +304,7 @@ std::vector<display_proficiency> proficiency_set::display() const
 }
 
 bool proficiency_set::practice( const proficiency_id &practicing, const time_duration &amount,
-                                const cata::optional<time_duration> &max )
+                                float remainder, const std::optional<time_duration> &max )
 {
     if( has_learned( practicing ) || !practicing->can_learn() || !has_prereqs( practicing ) ) {
         return false;
@@ -238,6 +320,11 @@ bool proficiency_set::practice( const proficiency_id &practicing, const time_dur
     }
 
     current.practiced += amount;
+    current.remainder += remainder;
+    if( current.remainder > 1.f ) {
+        current.practiced += 1_seconds;
+        current.remainder -= 1.f;
+    }
 
     if( current.practiced >= practicing->time_to_learn() ) {
         for( std::vector<learning_proficiency>::iterator it = learning.begin(); it != learning.end(); ) {
@@ -255,11 +342,36 @@ bool proficiency_set::practice( const proficiency_id &practicing, const time_dur
     return false;
 }
 
-void proficiency_set::learn( const proficiency_id &learned )
+void proficiency_set::set_time_practiced( const proficiency_id &practicing,
+        const time_duration &amount )
+{
+    if( amount >= practicing->time_to_learn() ) {
+        for( std::vector<learning_proficiency>::iterator it = learning.begin(); it != learning.end(); ) {
+            if( it->id == practicing ) {
+                it = learning.erase( it );
+            } else {
+                ++it;
+            }
+        }
+        learn( practicing );
+        return;
+    } else if( known.count( practicing ) ) {
+        remove( practicing );
+    }
+    if( !has_practiced( practicing ) ) {
+        learning.emplace_back( practicing, 0_seconds );
+    }
+    learning_proficiency &current = fetch_learning( practicing );
+    current.practiced = amount;
+}
+
+void proficiency_set::learn( const proficiency_id &learned, bool recursive )
 {
     for( const proficiency_id &req : learned->required_proficiencies() ) {
-        if( !has_learned( req ) ) {
+        if( !has_learned( req ) && !recursive ) {
             return;
+        } else if( recursive ) {
+            learn( req, recursive );
         }
     }
     known.insert( learned );
@@ -284,6 +396,15 @@ static std::set<proficiency_id> proficiencies_requiring(
 
 void proficiency_set::remove( const proficiency_id &lost )
 {
+    // Removes from proficiencies you are learning
+    for( std::vector<learning_proficiency>::iterator it = learning.begin(); it != learning.end(); ) {
+        if( it->id == lost ) {
+            it = learning.erase( it );
+        } else {
+            ++it;
+        }
+    }
+
     // No unintended side effects
     if( !known.count( lost ) ) {
         return;
@@ -362,6 +483,19 @@ float proficiency_set::pct_practiced( const proficiency_id &query ) const
     return 0.0f;
 }
 
+time_duration proficiency_set::pct_practiced_time( const proficiency_id &query ) const
+{
+    for( const learning_proficiency &prof : learning ) {
+        if( prof.id == query ) {
+            return prof.practiced;
+        }
+    }
+    if( has_learned( query ) ) {
+        return query->time_to_learn();
+    }
+    return 0_seconds;
+}
+
 time_duration proficiency_set::training_time_needed( const proficiency_id &query ) const
 {
     for( const learning_proficiency &prof : learning ) {
@@ -375,6 +509,7 @@ time_duration proficiency_set::training_time_needed( const proficiency_id &query
 std::vector<proficiency_id> proficiency_set::known_profs() const
 {
     std::vector<proficiency_id> ret;
+    ret.reserve( known.size() );
     for( const proficiency_id &knows : known ) {
         ret.push_back( knows );
     }
@@ -384,6 +519,7 @@ std::vector<proficiency_id> proficiency_set::known_profs() const
 std::vector<proficiency_id> proficiency_set::learning_profs() const
 {
     std::vector<proficiency_id> ret;
+    ret.reserve( learning.size() );
     for( const learning_proficiency &subject : learning ) {
         ret.push_back( subject.id );
     }
@@ -422,19 +558,13 @@ void proficiency_set::deserialize( const JsonObject &jsobj )
     jsobj.read( "learning", learning );
 }
 
-void proficiency_set::deserialize_legacy( const JsonArray &jo )
-{
-    for( const std::string prof : jo ) {
-        known.insert( proficiency_id( prof ) );
-    }
-}
-
 void learning_proficiency::serialize( JsonOut &jsout ) const
 {
     jsout.start_object();
 
     jsout.member( "id", id );
     jsout.member( "practiced", practiced );
+    jsout.member( "remainder", remainder );
 
     jsout.end_object();
 }
@@ -443,6 +573,7 @@ void learning_proficiency::deserialize( const JsonObject &jo )
 {
     jo.read( "id", id );
     jo.read( "practiced", practiced );
+    jo.read( "remainder", remainder, 0.f );
 }
 
 void book_proficiency_bonus::deserialize( const JsonObject &jo )

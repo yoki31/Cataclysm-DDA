@@ -10,11 +10,11 @@
 
 #include "bodypart.h"
 #include "color.h"
-#include "coordinates.h"
+#include "coords_fwd.h"
 #include "translations.h"
 #include "widget.h"
 
-class JsonIn;
+class JsonArray;
 class JsonOut;
 class avatar;
 class Character;
@@ -36,12 +36,13 @@ namespace catacurses
 class window;
 } // namespace catacurses
 
-
 namespace overmap_ui
 {
 void draw_overmap_chunk( const catacurses::window &w_minimap, const avatar &you,
                          const tripoint_abs_omt &global_omt, const point &start, int width,
                          int height );
+void draw_overmap_chunk_imgui( const avatar &you, const tripoint_abs_omt &global_omt,
+                               int width, int height );
 } // namespace overmap_ui
 
 bool default_render();
@@ -136,9 +137,11 @@ class panel_manager
         }
 
         panel_layout &get_current_layout();
+        widget *get_current_sidebar();
+        widget *get_sidebar( const std::string &name );
         std::string get_current_layout_id() const;
-        int get_width_right();
-        int get_width_left();
+        int get_width_right() const;
+        int get_width_left() const;
 
         void show_adm();
 
@@ -148,7 +151,7 @@ class panel_manager
         bool save();
         bool load();
         void serialize( JsonOut &json );
-        void deserialize( JsonIn &jsin );
+        void deserialize( const JsonArray &ja );
         // update the screen offsets so the game knows how to adjust the main window
         void update_offsets( int x );
 

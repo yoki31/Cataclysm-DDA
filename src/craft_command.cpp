@@ -7,26 +7,39 @@
 #include <limits>
 #include <list>
 #include <string>
+#include <utility>
 
 #include "activity_actor_definitions.h"
 #include "character.h"
 #include "crafting.h"
 #include "debug.h"
 #include "enum_conversions.h"
+#include "enum_traits.h"
 #include "flag.h"
+#include "flexbuffer_json-inl.h"
+#include "flexbuffer_json.h"
 #include "game_constants.h"
 #include "inventory.h"
 #include "item.h"
+#include "item_components.h"
+#include "item_contents.h"
+#include "item_location.h"
+#include "item_pocket.h"
+#include "itype.h"
 #include "json.h"
+#include "line.h"
+#include "map.h"
 #include "map_iterator.h"
 #include "output.h"
+#include "pocket_type.h"
 #include "recipe.h"
 #include "requirements.h"
 #include "translations.h"
 #include "type_id.h"
 #include "uistate.h"
-#include "vpart_range.h"
+#include "vehicle.h"
 #include "visitable.h"
+#include "vpart_position.h"
 
 static const itype_id itype_candle( "candle" );
 
@@ -100,10 +113,9 @@ template void comp_selection<item_comp>::serialize( JsonOut &jsout ) const;
 template void comp_selection<tool_comp>::deserialize( const JsonObject &data );
 template void comp_selection<item_comp>::deserialize( const JsonObject &data );
 
-void craft_command::execute( const cata::optional<tripoint> &new_loc )
+void craft_command::execute( const std::optional<tripoint_bub_ms> &new_loc )
 {
     loc = new_loc;
-
     execute();
 }
 
@@ -115,7 +127,7 @@ void craft_command::execute( bool only_cache_comps )
 
     bool need_selections = true;
     inventory map_inv;
-    map_inv.form_from_map( crafter->pos(), PICKUP_RANGE, crafter );
+    map_inv.form_from_map( crafter->pos_bub(), PICKUP_RANGE, crafter );
 
     if( has_cached_selections() ) {
         std::vector<comp_selection<item_comp>> missing_items = check_item_components_missing( map_inv );
@@ -175,7 +187,7 @@ void craft_command::execute( bool only_cache_comps )
 
         for( const auto &it : needs->get_components() ) {
             comp_selection<item_comp> is =
-                crafter->select_item_component( it, batch_size, map_inv, true, filter, true, rec );
+                crafter->select_item_component( it, batch_size, map_inv, true, filter, true, true, rec );
             if( is.use_from == usage_from::cancel ) {
                 return;
             }
@@ -185,7 +197,7 @@ void craft_command::execute( bool only_cache_comps )
         tool_selections.clear();
         for( const auto &it : needs->get_tools() ) {
             comp_selection<tool_comp> ts = crafter->select_tool_component(
-            it, batch_size, map_inv, true, true, []( int charges ) {
+            it, batch_size, map_inv, true, true, true, []( int charges ) {
                 return charges / 20 + charges % 20;
             } );
             if( ts.use_from == usage_from::cancel ) {
@@ -254,7 +266,7 @@ bool craft_command::continue_prompt_liquids( const std::function<bool( const ite
         const std::vector<pocket_data> it_pkt = it.comp.type->pockets;
         if( ( item::count_by_charges( it.comp.type ) && it.comp.count > 0 ) ||
         !std::any_of( it_pkt.begin(), it_pkt.end(), []( const pocket_data & p ) {
-        return p.type == item_pocket::pocket_type::CONTAINER && p.watertight;
+        return p.type == pocket_type::CONTAINER && p.watertight;
     } ) ) {
             continue;
         }
@@ -265,7 +277,7 @@ bool craft_command::continue_prompt_liquids( const std::function<bool( const ite
         };
 
         const char *liq_cont_msg = _( "%1$s is not empty.  Continue anyway?" );
-        std::vector<std::pair<const tripoint, item>> map_items;
+        std::vector<std::pair<const tripoint_bub_ms, item>> map_items;
         std::vector<std::pair<const vpart_reference, item>> veh_items;
         std::vector<item> inv_items;
 
@@ -273,7 +285,7 @@ bool craft_command::continue_prompt_liquids( const std::function<bool( const ite
             for( auto &mit : map_items ) {
                 m.add_item_or_charges( mit.first, mit.second );
             }
-            for( auto &iit : inv_items ) {
+            for( item &iit : inv_items ) {
                 crafter->i_add_or_drop( iit );
             }
             for( auto &vit : veh_items ) {
@@ -284,9 +296,9 @@ bool craft_command::continue_prompt_liquids( const std::function<bool( const ite
         int real_count = ( it.comp.count > 0 ) ? it.comp.count * batch_size : std::abs( it.comp.count );
         for( int i = 0; i < 2 && real_count > 0; i++ ) {
             if( it.use_from & usage_from::map ) {
-                const tripoint &loc = crafter->pos();
+                const tripoint_bub_ms &loc = crafter->pos_bub();
                 for( int radius = 0; radius <= PICKUP_RANGE && real_count > 0; radius++ ) {
-                    for( const tripoint &p : m.points_in_radius( loc, radius ) ) {
+                    for( const tripoint_bub_ms &p : m.points_in_radius( loc, radius ) ) {
                         if( rl_dist( loc, p ) >= radius ) {
                             // "Simulate" consuming items and put them back
                             // not very efficient but should be rare enough not to matter
@@ -299,10 +311,10 @@ bool craft_command::continue_prompt_liquids( const std::function<bool( const ite
                                     cont_not_empty = true;
                                     iname = tmp_i.tname( 1U, true );
                                 }
-                                if( const cata::optional<vpart_reference> vp = m.veh_at( p ).part_with_feature( "CARGO", true ) ) {
-                                    veh_items.emplace_back( std::pair<const vpart_reference, item>( vp.value(), tmp_i ) );
+                                if( const std::optional<vpart_reference> vp = m.veh_at( p ).cargo() ) {
+                                    veh_items.emplace_back( vp.value(), tmp_i );
                                 } else {
-                                    map_items.emplace_back( std::pair<const tripoint, item>( p, tmp_i ) );
+                                    map_items.emplace_back( p, tmp_i );
                                 }
                             }
                             if( cont_not_empty && ( no_prompt || !query_yn( liq_cont_msg, iname ) ) ) {
@@ -346,9 +358,10 @@ static std::list<item> sane_consume_items( const comp_selection<item_comp> &it, 
     const std::vector<pocket_data> it_pkt = it.comp.type->pockets;
     if( ( item::count_by_charges( it.comp.type ) && it.comp.count > 0 ) ||
     !std::any_of( it_pkt.begin(), it_pkt.end(), []( const pocket_data & p ) {
-    return p.type == item_pocket::pocket_type::CONTAINER && p.watertight;
+    return p.type == pocket_type::CONTAINER && p.watertight;
 } ) ) {
-        return crafter->consume_items( it, batch, filter );
+        std::list<item> consumed = crafter->consume_items( it, batch, filter );
+        return consumed;
     }
 
     // Everything below only occurs for item components that are liquid containers
@@ -360,9 +373,9 @@ static std::list<item> sane_consume_items( const comp_selection<item_comp> &it, 
     std::list<item> ret;
     for( int i = 0; i < 2 && real_count > 0; i++ ) {
         if( it.use_from & usage_from::map ) {
-            const tripoint &loc = crafter->pos();
+            const tripoint_bub_ms &loc = crafter->pos_bub();
             for( int radius = 0; radius <= PICKUP_RANGE && real_count > 0; radius++ ) {
-                for( const tripoint &p : m.points_in_radius( loc, radius ) ) {
+                for( const tripoint_bub_ms &p : m.points_in_radius( loc, radius ) ) {
                     if( rl_dist( loc, p ) >= radius ) {
                         std::list<item> tmp = m.use_amount_square( p, it.comp.type, real_count,
                                               i == 0 ? empty_filter : filter );
@@ -392,9 +405,9 @@ bool craft_command::safe_to_unload_comp( const item &it )
     const std::function<bool( const item &i )> filter = []( const item & i ) {
         return !i.has_flag( flag_ZERO_WEIGHT ) && !i.has_flag( flag_NO_DROP );
     };
-    const bool valid = it.get_contents().has_any_with( filter, item_pocket::pocket_type::CONTAINER ) ||
-                       it.get_contents().has_any_with( filter, item_pocket::pocket_type::MAGAZINE ) ||
-                       it.get_contents().has_any_with( filter, item_pocket::pocket_type::MAGAZINE_WELL );
+    const bool valid = it.get_contents().has_any_with( filter, pocket_type::CONTAINER ) ||
+                       it.get_contents().has_any_with( filter, pocket_type::MAGAZINE ) ||
+                       it.get_contents().has_any_with( filter, pocket_type::MAGAZINE_WELL );
     if( valid ) {
         return true;
     }
@@ -414,7 +427,7 @@ bool craft_command::safe_to_unload_comp( const item &it )
 item craft_command::create_in_progress_craft()
 {
     // Use up the components and tools
-    std::list<item> used;
+    item_components used;
     std::vector<item_comp> comps_used;
     if( crafter->has_trait( trait_DEBUG_HS ) ) {
         return item( rec, batch_size, used, comps_used );
@@ -426,7 +439,7 @@ item craft_command::create_in_progress_craft()
     }
 
     inventory map_inv;
-    map_inv.form_from_map( crafter->pos(), PICKUP_RANGE, crafter );
+    map_inv.form_from_map( crafter->pos_bub(), PICKUP_RANGE, crafter );
 
     if( !check_item_components_missing( map_inv ).empty() ) {
         debugmsg( "Aborting crafting: couldn't find cached components" );
@@ -449,7 +462,9 @@ item craft_command::create_in_progress_craft()
                 unload_activity_actor::unload( *crafter, tmp_loc );
             }
         }
-        used.splice( used.end(), tmp );
+        for( item &it : tmp ) {
+            used.add( it );
+        }
     }
 
     for( const comp_selection<item_comp> &selection : item_selections ) {

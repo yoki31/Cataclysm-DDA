@@ -9,8 +9,8 @@
     "type": "item_group",
     "id": "tripod",
     "items": [
-      { "item": "flamethrower", "prob": 1, "charges-min": 0, "charges-max": 3000 },
-      [ "kevlar_plate", 10 ],
+      { "item": "flamethrower", "prob": 1, "charges": [ 0, 3000 ] },
+      [ "sheet_kevlar_layered", 10 ],
       [ "ceramic_armor", 15 ],
       [ "alloy_plate", 10 ],
       [ "robot_controls", 3 ]
@@ -43,10 +43,10 @@
     "id": "tankbot",
     "items": [
       [ "tazer", 3 ],
-      { "item": "flamethrower", "prob": 1, "charges-min": 0, "charges-max": 3000 },
+      { "item": "flamethrower", "prob": 1, "charges": [ 0, 3000 ] },
       [ "556", 8 ],
       [ "alloy_plate", 10 ],
-      [ "kevlar_plate", 10 ],
+      [ "sheet_kevlar_layered", 10 ],
       [ "ceramic_armor", 10 ],
       [ "hard_plate", 30 ],
       [ "robot_controls", 5 ]
@@ -54,16 +54,27 @@
   },
   {
     "type": "item_group",
+    "id": "afs_bandits",
+    "subtype": "collection",
+    "entries": [
+      { "item": "boots_combat" },
+      { "item": "technician_pants_gray", "prob": 100, "damage": [ 0, 5 ] },
+      { "item": "technician_shirt_gray", "prob": 100, "damage": [ 0, 5 ] },
+      { "item": "afs_magellan_suit", "prob": 50, "damage": [ 0, 5 ] },
+      { "group": "afs_civilian_armory", "prob": 50 },
+      { "group": "mil_food", "prob": 100, "damage": [ 0, 5 ] }
+    ]
+  },
+  {
+    "type": "item_group",
     "id": "xl_uplift_death_drop",
     "subtype": "collection",
     "entries": [
-      { "item": "xlboots_combat" },
-      { "item": "xl_technician_pants_gray", "prob": 50 },
-      { "item": "xl_technician_shirt_gray", "prob": 100 },
-      { "item": "xl_jeans", "prob": 50 },
-      { "item": "mp5mag", "prob": 10 },
-      { "group": "military", "prob": 50 },
-      { "group": "mil_food", "prob": 100 }
+      { "item": "xlboots_combat", "damage": [ 0, 5 ] },
+      { "item": "xl_technician_pants_gray", "prob": 50, "damage": [ 0, 5 ] },
+      { "item": "xl_technician_shirt_gray", "prob": 100, "damage": [ 0, 5 ] },
+      { "item": "xl_jeans", "prob": 50, "damage": [ 0, 5 ] },
+      { "group": "mil_food", "prob": 100, "damage": [ 0, 5 ] }
     ]
   },
   {
@@ -71,13 +82,12 @@
     "id": "xl_uplift_zed_death_drop",
     "subtype": "collection",
     "entries": [
-      { "item": "xlboots_combat" },
-      { "item": "xl_technician_pants_gray", "prob": 50 },
-      { "item": "xl_technician_shirt_gray", "prob": 100 },
-      { "item": "xl_jeans", "prob": 50 },
+      { "item": "xlboots_combat", "damage": [ 1, 5 ] },
+      { "item": "xl_technician_pants_gray", "prob": 50, "damage": [ 1, 5 ] },
+      { "item": "xl_technician_shirt_gray", "prob": 100, "damage": [ 1, 5 ] },
+      { "item": "xl_jeans", "prob": 50, "damage": [ 1, 5 ] },
       { "item": "mp5mag", "prob": 10 },
-      { "group": "military", "prob": 50 },
-      { "group": "mil_food", "prob": 100 }
+      { "group": "mil_food", "prob": 100, "damage": [ 0, 5 ] }
     ]
   },
   {
@@ -292,7 +302,6 @@
     "type": "harvest",
     "message": "<centipede_harvest>",
     "entries": [
-      { "drop": "insect_sample", "type": "mutagen_group" },
       { "drop": "mutant_blood", "type": "blood", "mass_ratio": 0.1 },
       { "drop": "alien_flesh", "type": "flesh", "mass_ratio": 0.2 },
       { "drop": "alien_fat", "type": "flesh", "mass_ratio": 0.01 },

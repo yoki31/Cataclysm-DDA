@@ -2,8 +2,26 @@
   {
     "type": "EXTERNAL_OPTION",
     "name": "PLAYER_BASE_STAMINA_BURN_RATE",
-    "info": "Sets base stamina burn per 100 moves of the walking player.",
+    "//": "TODO: Why is this lower than vanilla?",
     "stype": "int",
     "value": 10
+  },
+  {
+    "type": "EXTERNAL_OPTION",
+    "name": "OVERRIDE_VEHICLE_INIT_STATE",
+    "stype": "bool",
+    "value": true
+  },
+  {
+    "type": "EXTERNAL_OPTION",
+    "name": "VEHICLE_STATUS_AT_SPAWN",
+    "stype": "int",
+    "value": 1
+  },
+  {
+    "type": "EXTERNAL_OPTION",
+    "name": "VEHICLE_FUEL_AT_SPAWN",
+    "stype": "int",
+    "value": 0
   }
 ]

@@ -34,8 +34,8 @@
         "|----------------------|"
       ],
       "palettes": [ "lab_palette" ],
-      "furniture": { "S": "f_sofa", "s": "f_sandbag_half", "&": "f_trashcan" },
-      "terrain": { "7": "t_console", "*": "t_thconc_floor" },
+      "furniture": { "7": "f_console", "S": "f_sofa", "s": "f_sandbag_half", "&": "f_trashcan" },
+      "terrain": { "*": "t_thconc_floor" },
       "mapping": {
         "l": { "items": [ { "item": "gear_soldier_sidearm", "chance": 33 } ] },
         "]": { "items": [ { "item": "book_military", "chance": 20 } ] },
@@ -43,10 +43,9 @@
         "d": { "items": [ { "item": "office", "chance": 50 } ] },
         "r": {
           "items": [
-            { "item": "military", "chance": 60 },
-            { "item": "ammo_milspec", "chance": 10 },
-            { "item": "guns_milspec", "chance": 10 },
-            { "item": "afs_weapons_rare", "chance": 5 }
+            { "item": "ammo_milspec", "chance": 40 },
+            { "item": "guns_milspec", "chance": 40 },
+            { "item": "afs_weapons_rare", "chance": 6 }
           ]
         },
         "*": { "items": [ { "item": "casings", "chance": 10 } ] }

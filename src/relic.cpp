@@ -59,6 +59,10 @@ std::string enum_to_string<relic_recharge_type>( relic_recharge_type type )
         case relic_recharge_type::NONE: return "none";
         case relic_recharge_type::PERIODIC: return "periodic";
         case relic_recharge_type::SOLAR_SUNNY: return "solar_sunny";
+        case relic_recharge_type::LUNAR: return "lunar";
+        case relic_recharge_type::FULL_MOON: return "full_moon";
+        case relic_recharge_type::NEW_MOON: return "new_moon";
+        case relic_recharge_type::SOLAR_CLOUDY: return "solar_cloudy";
         case relic_recharge_type::NUM: break;
     }
     // *INDENT-ON*
@@ -102,19 +106,26 @@ void relic_procgen_data::load_relic_procgen_data( const JsonObject &jo, const st
     relic_procgen_data_factory.load( jo, src );
 }
 
+relic::~relic() = default;
+
 void relic::add_active_effect( const fake_spell &sp )
 {
     active_effects.emplace_back( sp );
 }
 
-void relic::add_passive_effect( const enchantment &nench )
+void relic::add_passive_effect( const enchant_cache &nench )
 {
-    for( enchantment &ench : passive_effects ) {
+    for( enchant_cache &ench : proc_passive_effects ) {
         if( ench.add( nench ) ) {
             return;
         }
     }
-    passive_effects.emplace_back( nench );
+    proc_passive_effects.emplace_back( nench );
+}
+
+void relic::add_passive_effect( const enchantment &nench )
+{
+    defined_passive_effects.emplace_back( nench );
 }
 
 template<typename T>
@@ -155,7 +166,7 @@ void relic_procgen_data::enchantment_active::deserialize( const JsonObject &jobj
     load( jobj );
 }
 
-void relic_procgen_data::load( const JsonObject &jo, const std::string & )
+void relic_procgen_data::load( const JsonObject &jo, const std::string_view )
 {
     for( const JsonObject jo_inner : jo.get_array( "passive_add_procgen_values" ) ) {
         int weight = 0;
@@ -217,6 +228,7 @@ void relic_procgen_data::generation_rules::load( const JsonObject &jo )
     mandatory( jo, was_loaded, "power_level", power_level );
     mandatory( jo, was_loaded, "max_attributes", max_attributes );
     optional( jo, was_loaded, "max_negative_power", max_negative_power, 0 );
+    optional( jo, was_loaded, "resonant", resonant, false );
 }
 
 void relic_procgen_data::generation_rules::deserialize( const JsonObject &jo )
@@ -233,7 +245,6 @@ void relic_charge_template::deserialize( const JsonObject &jo )
 {
     load( jo );
 }
-
 
 void relic_charge_template::load( const JsonObject &jo )
 {
@@ -341,12 +352,15 @@ void relic::load( const JsonObject &jo )
     }
     if( jo.has_array( "passive_effects" ) ) {
         for( JsonObject jobj : jo.get_array( "passive_effects" ) ) {
-            enchantment ench;
+            enchant_cache ench;
             ench.load( jobj );
             if( !ench.id.is_empty() ) {
-                ench = ench.id.obj();
+                // for enchantments by id we need to wait till finalize to cast them to objects
+                // for now stash them
+                passive_enchant_ids.push_back( ench.id );
+            } else {
+                add_passive_effect( ench );
             }
-            add_passive_effect( ench );
         }
     }
     jo.read( "charge_info", charge );
@@ -355,6 +369,14 @@ void relic::load( const JsonObject &jo )
     }
     jo.read( "name", item_name_override );
     moves = jo.get_int( "moves", 100 );
+}
+
+void relic::finalize()
+{
+    // add the enchantments that we couldn't earlier in the load
+    for( const enchantment_id &ench : passive_enchant_ids ) {
+        add_passive_effect( ench.obj() );
+    }
 }
 
 void relic::deserialize( const JsonObject &jobj )
@@ -368,12 +390,12 @@ void relic::serialize( JsonOut &jsout ) const
 
     jsout.member( "moves", moves );
     // item_name_override is not saved, in case the original json text changes:
-    // in such case names read back from a save wouold no longer be properly translated.
+    // in such case names read back from a save would no longer be properly translated.
 
-    if( !passive_effects.empty() ) {
+    if( !proc_passive_effects.empty() ) {
         jsout.member( "passive_effects" );
         jsout.start_array();
-        for( const enchantment &ench : passive_effects ) {
+        for( const enchant_cache &ench : proc_passive_effects ) {
             ench.serialize( jsout );
         }
         jsout.end_array();
@@ -399,11 +421,11 @@ int relic::activate( Creature &caster, const tripoint &target )
         caster.add_msg_if_player( m_bad, _( "This artifact lacks the charges to activate." ) );
         return 0;
     }
-    caster.moves -= moves;
+    caster.mod_moves( -moves );
     for( const fake_spell &sp : active_effects ) {
-        spell casting = sp.get_spell( sp.level );
-        casting.cast_all_effects( caster, target );
-        caster.add_msg_if_player( casting.message() );
+        spell casting = sp.get_spell( caster, sp.level );
+        casting.cast_all_effects( caster, tripoint_bub_ms( target ) );
+        caster.add_msg_if_player( casting.message(), casting.name() );
     }
     charge.charges -= charge.charges_per_use;
     return charge.charges_per_use;
@@ -431,14 +453,23 @@ bool relic::has_recharge() const
 
 // checks if the relic is in the appropriate location to be able to recharge from the weather.
 // does not check the weather type, that job is relegated to the switch in relic::try_recharge()
-static bool can_recharge_solar( const item &it, Character *carrier, const tripoint &pos )
+static bool can_recharge_solar( const item &it, Character *carrier, const tripoint_bub_ms &pos )
 {
     return get_map().is_outside( pos ) && is_day( calendar::turn ) &&
            ( carrier == nullptr ||
              carrier->is_worn( it ) || carrier->is_wielding( it ) );
 }
 
-void relic::try_recharge( item &parent, Character *carrier, const tripoint &pos )
+// checks if the relic is in the appropriate location to be able to recharge from the weather.
+// does not check the weather type, that job is relegated to the switch in relic::try_recharge()
+static bool can_recharge_lunar( const item &it, Character *carrier, const tripoint_bub_ms &pos )
+{
+    return get_map().is_outside( pos ) && is_night( calendar::turn ) &&
+           ( carrier == nullptr ||
+             carrier->is_worn( it ) || carrier->is_wielding( it ) );
+}
+
+void relic::try_recharge( item &parent, Character *carrier, const tripoint_bub_ms &pos )
 {
     if( charge.regenerate_ammo && item_can_not_load_ammo( parent ) ) {
         return;
@@ -465,6 +496,35 @@ void relic::try_recharge( item &parent, Character *carrier, const tripoint &pos 
             }
             return;
         }
+        case relic_recharge_type::LUNAR : {
+            if( can_recharge_lunar( parent, carrier, pos ) &&
+                get_moon_phase( calendar::turn ) >= MOON_NEW &&
+                get_moon_phase( calendar::turn ) <= MOON_WANING_CRESCENT ) {
+                charge.accumulate_charge( parent );
+            }
+            return;
+        }
+        case relic_recharge_type::FULL_MOON : {
+            if( can_recharge_lunar( parent, carrier, pos ) &&
+                get_moon_phase( calendar::turn ) == MOON_FULL ) {
+                charge.accumulate_charge( parent );
+            }
+            return;
+        }
+        case relic_recharge_type::NEW_MOON : {
+            if( can_recharge_lunar( parent, carrier, pos ) &&
+                get_moon_phase( calendar::turn ) == MOON_NEW ) {
+                charge.accumulate_charge( parent );
+            }
+            return;
+        }
+        case relic_recharge_type::SOLAR_CLOUDY: {
+            if( can_recharge_solar( parent, carrier, pos ) &&
+                get_weather().weather_id->light_modifier < 0 ) {
+                charge.accumulate_charge( parent );
+            }
+            return;
+        }
         case relic_recharge_type::NUM: {
             debugmsg( "Attempted to recharge relic with invalid recharge type" );
             return;
@@ -472,7 +532,7 @@ void relic::try_recharge( item &parent, Character *carrier, const tripoint &pos 
     }
 }
 
-bool relic::can_recharge( item &parent, Character *carrier )
+bool relic::can_recharge( item &parent, Character *carrier ) const
 {
 
     if( carrier == nullptr && charge.has != relic_recharge_has::NUM ) {
@@ -501,7 +561,6 @@ bool relic::can_recharge( item &parent, Character *carrier )
 
     return true;
 
-
 }
 
 void relic::overwrite_charge( const relic_charge_info &info )
@@ -509,38 +568,25 @@ void relic::overwrite_charge( const relic_charge_info &info )
     charge = info;
 }
 
-int relic::modify_value( const enchant_vals::mod value_type, const int value ) const
-{
-    int add_modifier = 0;
-    double multiply_modifier = 0.0;
-    for( const enchantment &ench : passive_effects ) {
-        add_modifier += ench.get_value_add( value_type );
-        multiply_modifier += ench.get_value_multiply( value_type );
-    }
-    multiply_modifier = std::max( multiply_modifier + 1.0, 0.0 );
-    int modified_value;
-    if( multiply_modifier < 1.0 ) {
-        modified_value = std::floor( multiply_modifier * value );
-    } else {
-        modified_value = std::ceil( multiply_modifier * value );
-    }
-    return modified_value + add_modifier;
-}
-
 std::string relic::name() const
 {
     return item_name_override.translated();
 }
 
-std::vector<enchantment> relic::get_enchantments() const
+std::vector<enchant_cache> relic::get_proc_enchantments() const
 {
-    return passive_effects;
+    return proc_passive_effects;
+}
+
+std::vector<enchantment> relic::get_defined_enchantments() const
+{
+    return defined_passive_effects;
 }
 
 int relic::power_level( const relic_procgen_id &ruleset ) const
 {
     int total_power_level = 0;
-    for( const enchantment &ench : passive_effects ) {
+    for( const enchant_cache &ench : proc_passive_effects ) {
         total_power_level += ruleset->power_level( ench );
     }
     for( const fake_spell &sp : active_effects ) {
@@ -555,7 +601,7 @@ bool relic::has_activation() const
     return !active_effects.empty();
 }
 
-int relic_procgen_data::power_level( const enchantment &ench ) const
+int relic_procgen_data::power_level( const enchant_cache &ench ) const
 {
     int power = 0;
 
@@ -636,7 +682,7 @@ relic relic_procgen_data::generate( const relic_procgen_data::generation_rules &
             case relic_procgen_data::type::passive_enchantment_add: {
                 const relic_procgen_data::enchantment_value_passive<int> *add = passive_add_procgen_values.pick();
                 if( add != nullptr ) {
-                    enchantment ench;
+                    enchant_cache ench;
                     int value = rng( add->min_value, add->max_value );
                     if( value == 0 ) {
                         break;
@@ -654,7 +700,7 @@ relic relic_procgen_data::generate( const relic_procgen_data::generation_rules &
                     } else if( is_armor ) {
                         ench.set_has( enchantment::has::WORN );
                     } else {
-                        ench.set_has( enchantment::has::WIELD );
+                        ench.set_has( enchantment::has::HELD );
                     }
                     num_attributes++;
                     ret.add_passive_effect( ench );
@@ -665,8 +711,8 @@ relic relic_procgen_data::generate( const relic_procgen_data::generation_rules &
                 const relic_procgen_data::enchantment_value_passive<float> *mult =
                     passive_mult_procgen_values.pick();
                 if( mult != nullptr ) {
-                    enchantment ench;
-                    float value = rng( mult->min_value, mult->max_value );
+                    enchant_cache ench;
+                    float value = rng_float( mult->min_value, mult->max_value );
                     ench.add_value_mult( mult->type, value );
                     int negative_ench_attribute = power_level( ench );
                     if( negative_ench_attribute < 0 ) {
@@ -680,7 +726,7 @@ relic relic_procgen_data::generate( const relic_procgen_data::generation_rules &
                     } else if( is_armor ) {
                         ench.set_has( enchantment::has::WORN );
                     } else {
-                        ench.set_has( enchantment::has::WIELD );
+                        ench.set_has( enchantment::has::HELD );
                     }
                     num_attributes++;
                     ret.add_passive_effect( ench );
@@ -693,7 +739,7 @@ relic relic_procgen_data::generate( const relic_procgen_data::generation_rules &
                     fake_spell active_sp;
                     active_sp.id = active->activated_spell;
                     active_sp.level = rng( active->min_level, active->max_level );
-                    enchantment ench;
+                    enchant_cache ench;
                     ench.add_hit_me( active_sp );
                     int power = power_level( ench );
                     if( power < 0 ) {
@@ -707,7 +753,7 @@ relic relic_procgen_data::generate( const relic_procgen_data::generation_rules &
                     } else if( is_armor ) {
                         ench.set_has( enchantment::has::WORN );
                     } else {
-                        ench.set_has( enchantment::has::WIELD );
+                        ench.set_has( enchantment::has::HELD );
                     }
                     num_attributes++;
                     ret.add_passive_effect( ench );
@@ -720,7 +766,7 @@ relic relic_procgen_data::generate( const relic_procgen_data::generation_rules &
                     fake_spell active_sp;
                     active_sp.id = active->activated_spell;
                     active_sp.level = rng( active->min_level, active->max_level );
-                    enchantment ench;
+                    enchant_cache ench;
                     ench.add_hit_you( active_sp );
                     int power = power_level( ench );
                     if( power < 0 ) {
@@ -734,7 +780,7 @@ relic relic_procgen_data::generate( const relic_procgen_data::generation_rules &
                     } else if( is_armor ) {
                         ench.set_has( enchantment::has::WORN );
                     } else {
-                        ench.set_has( enchantment::has::WIELD );
+                        ench.set_has( enchantment::has::HELD );
                     }
                     num_attributes++;
                     ret.add_passive_effect( ench );
@@ -755,6 +801,14 @@ relic relic_procgen_data::generate( const relic_procgen_data::generation_rules &
         }
     }
 
+    //add an optional enchantment of the value of ret's power (the artifact being created) - resonance is equal to its power (min zero)
+    if( rules.resonant ) {
+        enchant_cache resonance;
+        int value = std::max( 0, ret.power_level( id ) );
+        resonance.add_value_add( enchant_vals::mod::ARTIFACT_RESONANCE, value );
+        resonance.set_has( enchantment::has::HELD );
+        ret.add_passive_effect( resonance );
+    }
     return ret;
 }
 
@@ -768,10 +822,13 @@ bool operator==( const relic &source_relic, const relic &target_relic )
     is_the_same &= ( source_relic.max_charges() == target_relic.max_charges() );
     is_the_same &= ( source_relic.name() == target_relic.name() );
 
-    is_the_same &= ( source_relic.get_enchantments().size() == target_relic.get_enchantments().size() );
+    is_the_same &= ( source_relic.get_proc_enchantments().size() ==
+                     target_relic.get_proc_enchantments().size() );
+    is_the_same &= ( source_relic.get_defined_enchantments().size() ==
+                     target_relic.get_defined_enchantments().size() );
     if( is_the_same ) {
-        for( std::size_t i = 0; i < source_relic.get_enchantments().size(); i++ ) {
-            is_the_same &= source_relic.get_enchantments()[i] == target_relic.get_enchantments()[i];
+        for( std::size_t i = 0; i < source_relic.get_proc_enchantments().size(); i++ ) {
+            is_the_same &= source_relic.get_proc_enchantments()[i] == target_relic.get_proc_enchantments()[i];
         }
     }
     return is_the_same;

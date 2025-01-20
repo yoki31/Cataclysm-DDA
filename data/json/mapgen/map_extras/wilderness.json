@@ -9,10 +9,10 @@
       "|": [ "t_region_groundcover", [ "t_grass_long", 10 ] ]
     },
     "furniture": {
-      ".": [ [ "f_null", 2000 ], [ "f_region_weed", 20 ], [ "f_boulder_small", 6 ], "f_boulder_medium", "f_boulder_large" ],
-      ",": [ [ "f_null", 2000 ], [ "f_region_weed", 40 ], [ "f_boulder_small", 6 ], "f_boulder_medium", "f_boulder_large" ],
-      ";": [ [ "f_null", 2000 ], [ "f_region_weed", 50 ], [ "f_boulder_small", 6 ], "f_boulder_medium", "f_boulder_large" ],
-      "|": [ [ "f_null", 2000 ], [ "f_region_weed", 60 ], [ "f_boulder_small", 6 ], "f_boulder_medium", "f_boulder_large" ]
+      ".": [ [ "f_null", 2000 ], [ "f_region_plain", 20 ], [ "f_boulder_small", 6 ], "f_boulder_medium", "f_boulder_large" ],
+      ",": [ [ "f_null", 2000 ], [ "f_region_plain", 40 ], [ "f_boulder_small", 6 ], "f_boulder_medium", "f_boulder_large" ],
+      ";": [ [ "f_null", 2000 ], [ "f_region_plain", 50 ], [ "f_boulder_small", 6 ], "f_boulder_medium", "f_boulder_large" ],
+      "|": [ [ "f_null", 2000 ], [ "f_region_plain", 60 ], [ "f_boulder_small", 6 ], "f_boulder_medium", "f_boulder_large" ]
     }
   },
   {
@@ -25,9 +25,9 @@
       "|": [ [ "t_region_groundcover_forest", 7 ], "t_puddle" ]
     },
     "furniture": {
-      ".": [ [ "f_null", 2000 ], [ "f_region_weed", 20 ], [ "f_boulder_small", 6 ], "f_boulder_medium", "f_boulder_large" ],
-      ",": [ [ "f_null", 2000 ], [ "f_region_weed", 40 ], [ "f_boulder_small", 6 ], [ "f_boulder_medium", 2 ], "f_boulder_large" ],
-      ";": [ [ "f_null", 2000 ], [ "f_region_weed", 60 ], [ "f_boulder_small", 6 ], [ "f_boulder_medium", 2 ], "f_boulder_large" ]
+      ".": [ [ "f_null", 2000 ], [ "f_region_plain", 20 ], [ "f_boulder_small", 6 ], "f_boulder_medium", "f_boulder_large" ],
+      ",": [ [ "f_null", 2000 ], [ "f_region_plain", 40 ], [ "f_boulder_small", 6 ], [ "f_boulder_medium", 2 ], "f_boulder_large" ],
+      ";": [ [ "f_null", 2000 ], [ "f_region_plain", 60 ], [ "f_boulder_small", 6 ], [ "f_boulder_medium", 2 ], "f_boulder_large" ]
     }
   },
   {
@@ -107,6 +107,80 @@
       ],
       "flags": [ "ALLOW_TERRAIN_UNDER_OTHER_DATA" ],
       "palettes": [ "long_grass_meadow_palette" ]
+    }
+  },
+  {
+    "type": "mapgen",
+    "method": "json",
+    "update_mapgen_id": "mx_knotweed_patch",
+    "object": {
+      "rows": [
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "        ;;;|;;;;        ",
+        "       ;;;;|||;;        ",
+        "      ;;||;||;;;;       ",
+        "     ;;;;;||;||;;       ",
+        "      ;|||||;|;;;       ",
+        "       ;;;;|;||;        ",
+        "       ;;|||||;;        ",
+        "      ;;|;||;||;;       ",
+        "        ;;||;;;;        ",
+        "        ;;;;|;;         ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        "
+      ],
+      "flags": [ "ERASE_ALL_BEFORE_PLACING_TERRAIN" ],
+      "terrain": { ";": [ "t_region_groundcover", [ "t_grass_long", 2 ] ], "|": [ "t_region_groundcover", [ "t_grass_tall", 3 ] ] },
+      "furniture": { "|": [ [ "f_japanese_knotweed", 10 ], "f_null" ] }
+    }
+  },
+  {
+    "type": "mapgen",
+    "method": "json",
+    "update_mapgen_id": "mx_blackberry_patch",
+    "object": {
+      "rows": [
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "        ;;;|;;;;        ",
+        "       ;;;;|||;;        ",
+        "      ;;||;||;;;;       ",
+        "     ;;;;;||;||;;       ",
+        "      ;|||||;|;;;       ",
+        "       ;;;;|;||;        ",
+        "       ;;|||||;;        ",
+        "      ;;|;||;||;;       ",
+        "        ;;||;;;;        ",
+        "        ;;;;|;;         ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        ",
+        "                        "
+      ],
+      "flags": [ "ERASE_ALL_BEFORE_PLACING_TERRAIN" ],
+      "terrain": {
+        ";": [ "t_region_groundcover", [ "t_grass_long", 2 ] ],
+        "|": [ "t_region_groundcover", [ "t_shrub_blackberry", 10 ], [ "t_region_tree", 3 ] ]
+      }
     }
   },
   {
@@ -695,5 +769,58 @@
         { "monster": "GROUP_SWAMP", "x": [ 0, 23 ], "y": [ 0, 23 ], "chance": 5, "density": 0.5 }
       ]
     }
+  },
+  {
+    "type": "mapgen",
+    "method": "json",
+    "update_mapgen_id": "mx_worm_sign",
+    "object": {
+      "rows": [
+        "        .........       ",
+        "     ...............    ",
+        "   ...................  ",
+        "  ....................  ",
+        "  ..................... ",
+        " ...................... ",
+        " ...................... ",
+        "........................",
+        "........................",
+        "........................",
+        "...........x............",
+        "........................",
+        "........................",
+        "........................",
+        "........................",
+        "........................",
+        "........................",
+        " ...................... ",
+        " ...................... ",
+        " ...................... ",
+        "  ....................  ",
+        "  ....................  ",
+        "    ................    ",
+        "       ..........       "
+      ],
+      "flags": [ "ALLOW_TERRAIN_UNDER_OTHER_DATA" ],
+      "nested": {
+        ".": { "chunks": [ [ "null", 20 ], [ "1x1_upturn_earth", 1 ] ] },
+        "x": { "chunks": [ [ "null", 20 ], [ "1x1_upturn_earth", 1 ] ] }
+      },
+      "monsters": {
+        ".": { "monster": "GROUP_WORM", "chance": 2, "density": 0.0001 },
+        "x": { "monster": "GROUP_WORM", "chance": 100, "density": 0.0001 }
+      }
+    }
+  },
+  {
+    "type": "mapgen",
+    "method": "json",
+    "nested_mapgen_id": "1x1_upturn_earth",
+    "object": { "mapgensize": [ 1, 1 ], "place_ter_furn_transforms": [ { "transform": "upturn_earth", "x": 0, "y": 0 } ] }
+  },
+  {
+    "type": "ter_furn_transform",
+    "id": "upturn_earth",
+    "terrain": [ { "result": "t_dirtmound", "valid_flags": [ "DIGGABLE" ] } ]
   }
 ]

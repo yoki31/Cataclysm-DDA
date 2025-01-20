@@ -1,23 +1,23 @@
 #include <functional>
-#include <functional>
+#include <optional>
 #include <list>
 
 #include "cata_catch.h"
 #include "character.h"
 #include "item.h"
 #include "item_location.h"
-#include "item_pocket.h"
 #include "map.h"
 #include "map_helpers.h"
 #include "map_selector.h"
-#include "optional.h"
 #include "player_helpers.h"
+#include "pocket_type.h"
 #include "point.h"
 #include "ret_val.h"
 #include "rng.h"
 #include "type_id.h"
 #include "visitable.h"
 
+static const itype_id itype_backpack( "backpack" );
 static const itype_id itype_jeans( "jeans" );
 static const itype_id itype_tshirt( "tshirt" );
 
@@ -25,13 +25,13 @@ TEST_CASE( "item_location_can_maintain_reference_despite_item_removal", "[item][
 {
     clear_map();
     map &m = get_map();
-    tripoint pos( 60, 60, 0 );
+    tripoint_bub_ms pos( 60, 60, 0 );
     m.i_clear( pos );
-    m.add_item( pos, item( "jeans" ) );
-    m.add_item( pos, item( "jeans" ) );
-    m.add_item( pos, item( "tshirt" ) );
-    m.add_item( pos, item( "jeans" ) );
-    m.add_item( pos, item( "jeans" ) );
+    m.add_item( pos, item( itype_jeans ) );
+    m.add_item( pos, item( itype_jeans ) );
+    m.add_item( pos, item( itype_tshirt ) );
+    m.add_item( pos, item( itype_jeans ) );
+    m.add_item( pos, item( itype_jeans ) );
     map_cursor cursor( pos );
     item *tshirt = nullptr;
     cursor.visit_items( [&tshirt]( item * i, item * ) {
@@ -62,13 +62,13 @@ TEST_CASE( "item_location_doesnt_return_stale_map_item", "[item][item_location]"
 {
     clear_map();
     map &m = get_map();
-    tripoint pos( 60, 60, 0 );
+    tripoint_bub_ms pos( 60, 60, 0 );
     m.i_clear( pos );
-    m.add_item( pos, item( "tshirt" ) );
+    m.add_item( pos, item( itype_tshirt ) );
     item_location item_loc( map_cursor( pos ), &m.i_at( pos ).only_item() );
     REQUIRE( item_loc->typeId() == itype_tshirt );
     m.i_rem( pos, &*item_loc );
-    m.add_item( pos, item( "jeans" ) );
+    m.add_item( pos, item( itype_jeans ) );
     CHECK( !item_loc );
 }
 
@@ -76,14 +76,14 @@ TEST_CASE( "item_in_container", "[item][item_location]" )
 {
     Character &dummy = get_player_character();
     clear_avatar();
-    item &backpack = dummy.i_add( item( "backpack" ) );
-    item jeans( "jeans" );
+    item_location backpack = dummy.i_add( item( itype_backpack ) );
+    item jeans( itype_jeans );
 
-    REQUIRE( dummy.has_item( backpack ) );
+    REQUIRE( dummy.has_item( *backpack ) );
 
-    backpack.put_in( jeans, item_pocket::pocket_type::CONTAINER );
+    backpack->put_in( jeans, pocket_type::CONTAINER );
 
-    item_location backpack_loc( dummy, & **dummy.wear_item( backpack ) );
+    item_location backpack_loc( dummy, & **dummy.wear_item( *backpack ) );
 
     REQUIRE( dummy.has_item( *backpack_loc ) );
 

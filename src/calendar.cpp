@@ -5,14 +5,14 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <optional>
+#include <ostream>
 #include <string>
+#include <tuple>
 
-#include "cata_assert.h"
-#include "cata_utility.h"
 #include "debug.h"
-#include "enum_conversions.h"
+#include "display.h"
 #include "line.h"
-#include "optional.h"
 #include "options.h"
 #include "rng.h"
 #include "string_formatter.h"
@@ -21,7 +21,7 @@
 #include "units_utility.h"
 
 /** How much light moon provides per lit-up quarter (Full-moon light is four times this value) */
-static constexpr double moonlight_per_quarter = 1.5;
+static constexpr float moonlight_per_quarter = 1.5f;
 
 // Divided by 100 to prevent overflowing when converted to moves
 const int calendar::INDEFINITELY_LONG( std::numeric_limits<int>::max() / 100 );
@@ -31,6 +31,7 @@ static bool is_eternal_season = false;
 static bool is_eternal_night = false;
 static bool is_eternal_day = false;
 static int cur_season_length = 1;
+static lat_long location = { 42.36_degrees, -71.06_degrees };
 
 time_point calendar::start_of_cataclysm = calendar::turn_zero;
 time_point calendar::start_of_game = calendar::turn_zero;
@@ -43,9 +44,14 @@ static constexpr units::angle nautical_dawn = -12_degrees;
 static constexpr units::angle civil_dawn = -6_degrees;
 static constexpr units::angle sunrise_angle = -1_degrees;
 
-double default_daylight_level()
+float default_daylight_level()
 {
-    return 100.0;
+    return 100.0f;
+}
+
+float max_sun_irradiance()
+{
+    return 1000.f;
 }
 
 time_duration lunar_month()
@@ -72,6 +78,20 @@ std::string enum_to_string<moon_phase>( moon_phase phase_num )
     }
     cata_fatal( "Invalid moon_phase %d", phase_num );
 }
+template<>
+std::string enum_to_string<time_accuracy>( time_accuracy acc )
+{
+    switch( acc ) {
+        case time_accuracy::PARTIAL: return "PARTIAL";
+        case time_accuracy::FULL: return "FULL";
+        case time_accuracy::NUM_TIME_ACCURACY:
+        case time_accuracy::NONE: break;
+        default:
+            DebugLog( DebugLevel::D_WARNING, DebugClass::D_GAME )
+                << "Invalid time_accuracy " << static_cast<int>( acc );
+    }
+    return "NONE";
+}
 // *INDENT-ON*
 } // namespace io
 
@@ -82,12 +102,13 @@ moon_phase get_moon_phase( const time_point &p )
     const int num_middays = to_days<int>( p - calendar::turn_zero + 1_days / 2 );
     const time_duration nearest_midnight = num_middays * 1_days;
     const double phase_change = nearest_midnight / moon_phase_duration;
-    const int current_phase = static_cast<int>( std::round( phase_change * MOON_PHASE_MAX ) ) %
+    const int current_phase = static_cast<int>( std::round( phase_change * static_cast<int>
+                              ( MOON_PHASE_MAX ) ) ) %
                               static_cast<int>( MOON_PHASE_MAX );
     return static_cast<moon_phase>( current_phase );
 }
 
-static constexpr time_duration angle_to_time( const units::angle a )
+static constexpr time_duration angle_to_time( const units::angle &a )
 {
     return a / 15.0_degrees * 1_hours;
 }
@@ -129,7 +150,7 @@ static std::pair<units::angle, units::angle> sun_ra_declination(
     // J2000, so use that as our offset too.  The relative drift is slow, so we
     // neglect it.
     const units::angle mean_anomaly = 77_degrees + mean_long;
-    // The two arbitrary constants in the caclulation of ecliptic longitude
+    // The two arbitrary constants in the calculation of ecliptic longitude
     // relate to the non-circularity of the Earth's orbit.
     const units::angle ecliptic_longitude =
         mean_long + 1.915_degrees * sin( mean_anomaly ) + 0.020_degrees * sin( 2 * mean_anomaly );
@@ -169,7 +190,6 @@ std::pair<units::angle, units::angle> sun_azimuth_altitude(
     time_point ti )
 {
     const season_effective_time t = season_effective_time( ti );
-    const lat_long location = location_boston;
     units::angle right_ascension;
     units::angle declination;
     time_duration timezone = angle_to_time( location.longitude );
@@ -222,14 +242,14 @@ static units::angle sun_altitude( time_point t )
     return sun_azimuth_altitude( t ).second;
 }
 
-cata::optional<rl_vec2d> sunlight_angle( const time_point &t )
+std::optional<rl_vec2d> sunlight_angle( const time_point &t )
 {
     units::angle azimuth;
     units::angle altitude;
     std::tie( azimuth, altitude ) = sun_azimuth_altitude( t );
     if( altitude <= sunrise_angle ) {
         // Sun below horizon
-        return cata::nullopt;
+        return std::nullopt;
     }
     rl_vec2d horizontal_direction( -sin( azimuth ), cos( azimuth ) );
     rl_vec3d direction( horizontal_direction * cos( altitude ), sin( altitude ) );
@@ -248,16 +268,16 @@ static time_point solar_noon_near( const time_point &t )
 }
 
 static units::angle offset_to_sun_altitude(
-    const units::angle altitude, const units::angle longitude,
-    const season_effective_time approx_time, const bool evening )
+    const units::angle &altitude, const units::angle &longitude,
+    const season_effective_time &approx_time, const bool evening )
 {
     units::angle ra;
     units::angle declination;
     time_duration timezone = angle_to_time( longitude );
     std::tie( ra, declination ) = sun_ra_declination( approx_time, timezone );
     double cos_hour_angle =
-        ( sin( altitude ) - sin( location_boston.latitude ) * sin( declination ) ) /
-        cos( location_boston.latitude ) / cos( declination );
+        ( sin( altitude ) - sin( location.latitude ) * sin( declination ) ) /
+        cos( location.latitude ) / cos( declination );
     if( std::abs( cos_hour_angle ) > 1 ) {
         // It doesn't actually reach that angle, so we pretend that it does at
         // its maximum possible angle
@@ -269,12 +289,12 @@ static units::angle offset_to_sun_altitude(
     }
     const units::angle target_sidereal_time = hour_angle + ra;
     const units::angle sidereal_time_at_approx_time =
-        sidereal_time_at( approx_time, location_boston.longitude, timezone );
+        sidereal_time_at( approx_time, location.longitude, timezone );
     return normalize( target_sidereal_time - sidereal_time_at_approx_time );
 }
 
-static time_point sun_at_altitude( const units::angle altitude, const units::angle longitude,
-                                   const time_point t, const bool evening )
+static time_point sun_at_altitude( const units::angle &altitude, const units::angle &longitude,
+                                   const time_point &t, const bool evening )
 {
     const time_point solar_noon = solar_noon_near( t );
     units::angle initial_offset =
@@ -298,27 +318,34 @@ static time_point sun_at_altitude( const units::angle altitude, const units::ang
 
 time_point sunrise( const time_point &p )
 {
-    return sun_at_altitude( sunrise_angle, location_boston.longitude, p, false );
+    return sun_at_altitude( sunrise_angle, location.longitude, p, false );
 }
 
 time_point sunset( const time_point &p )
 {
-    return sun_at_altitude( sunrise_angle, location_boston.longitude, p, true );
+    return sun_at_altitude( sunrise_angle, location.longitude, p, true );
 }
 
 time_point night_time( const time_point &p )
 {
-    return sun_at_altitude( civil_dawn, location_boston.longitude, p, true );
+    return sun_at_altitude( civil_dawn, location.longitude, p, true );
 }
 
 time_point daylight_time( const time_point &p )
 {
-    return sun_at_altitude( civil_dawn, location_boston.longitude, p, false );
+    return sun_at_altitude( civil_dawn, location.longitude, p, false );
+}
+
+time_point noon( const time_point &p )
+{
+    const time_duration time_of_day = ( p - calendar::turn_zero ) % 1_days;
+    const time_duration till_noon = time_of_day - 12_hours;
+    return ( till_noon > 0_seconds ) ? p - till_noon : p + till_noon;
 }
 
 bool is_night( const time_point &p )
 {
-    return sun_altitude( p ) <= nautical_dawn;
+    return sun_altitude( p ) <= civil_dawn;
 }
 
 bool is_day( const time_point &p )
@@ -329,7 +356,7 @@ bool is_day( const time_point &p )
 static bool is_twilight( const time_point &p )
 {
     units::angle altitude = sun_altitude( p );
-    return altitude >= astronomical_dawn && altitude <= sunrise_angle;
+    return altitude >= civil_dawn && altitude <= sunrise_angle;
 }
 
 bool is_dusk( const time_point &p )
@@ -377,12 +404,22 @@ float sun_light_at( const time_point &p )
     }
 }
 
+float sun_irradiance( const time_point &p )
+{
+    const units::angle solar_alt = sun_altitude( p );
+
+    if( solar_alt < 0_degrees ) {
+        return 0;
+    }
+    return max_sun_irradiance() * sin( solar_alt );
+}
+
 float sun_moon_light_at( const time_point &p )
 {
     return sun_light_at( p ) + moon_light_at( p );
 }
 
-double sun_moon_light_at_noon_near( const time_point &p )
+float sun_moon_light_at_noon_near( const time_point &p )
 {
     const time_point solar_noon = solar_noon_near( p );
     return sun_moon_light_at( solar_noon );
@@ -696,6 +733,10 @@ void calendar::set_season_length( const int dur )
 {
     cur_season_length = dur;
 }
+void calendar::set_location( float latitude, float longitude )
+{
+    location = { units::from_degrees( latitude ), units::from_degrees( longitude ) };
+}
 
 static constexpr int real_world_season_length = 91;
 static constexpr int default_season_length = real_world_season_length;
@@ -802,6 +843,97 @@ std::string to_string( const time_point &p )
         return string_format( _( "Year %1$d, %2$s, day %3$d %4$s" ), year,
                               calendar::name_season( season_of_year( p ) ), day, time );
     }
+}
+
+std::string get_diary_time_since_str( const time_duration &turn_diff, time_accuracy acc )
+{
+    const int days = to_days<int>( turn_diff );
+    const int hours = to_hours<int>( turn_diff ) % 24;
+    const int minutes = to_minutes<int>( turn_diff ) % 60;
+    std::string days_text;
+    std::string hours_text;
+    std::string minutes_text;
+    switch( acc ) {
+        case time_accuracy::FULL:
+            if( days > 0 ) {
+                days_text = string_format( n_gettext( "%d day, ", "%d days, ", days ), days );
+            }
+            if( hours > 0 ) {
+                hours_text = string_format( n_gettext( "%d hour, ", "%d hours, ", hours ), hours );
+            }
+            minutes_text = string_format( n_gettext( "%d minute", "%d minutes", minutes ), minutes );
+            break;
+        case time_accuracy::PARTIAL:
+            if( days > 0 ) {
+                days_text = string_format( n_gettext( "%d day", "%d days", days ), days );
+            } else if( hours > 0 ) {
+                //~ Estimate of how much time has passed since the last entry
+                days_text = _( "Less than a day" );
+            } else {
+                //~ Estimate of how much time has passed since the last entry
+                days_text = _( "Not long" );
+            }
+            break;
+        default:
+            DebugLog( DebugLevel::D_WARNING, DebugClass::D_GAME )
+                    << "Unknown time_accuracy " << io::enum_to_string<time_accuracy>( acc );
+            [[fallthrough]];
+        case time_accuracy::NUM_TIME_ACCURACY:
+        case time_accuracy::NONE:
+            //~ Estimate of how much time has passed since the last entry
+            days_text = days > 0 ? _( "A long while" ) : hours > 0 ? _( "A while" ) : _( "A short while" );
+            break;
+
+    }
+    //~ %1$s is xx days, %2$s is xx hours, %3$s is xx minutes
+    return string_format( _( "%1$s%2$s%3$s since last entry" ), days_text, hours_text, minutes_text );
+}
+
+std::string get_diary_time_str( const time_point &turn, time_accuracy acc )
+{
+    const int year = to_turns<int>( turn - calendar::turn_zero ) /
+                     to_turns<int>( calendar::year_length() ) + 1;
+    const int day = day_of_season<int>( turn ) + 1;
+    switch( acc ) {
+        case time_accuracy::FULL:
+            return to_string( turn );
+        case time_accuracy::PARTIAL:
+            // partial accuracy, able to see the sky
+            //~ Time of year:
+            //~ $1 = year since Cataclysm
+            //~ $2 = season
+            //~ $3 = day of season
+            //~ $4 = approximate time of day
+            return string_format( _( "Year %1$d, %2$s, day %3$d, %4$s" ), year,
+                                  calendar::name_season( season_of_year( turn ) ),
+                                  day, display::time_approx( turn ) );
+        default:
+            DebugLog( DebugLevel::D_WARNING, DebugClass::D_GAME )
+                    << "Unknown time_accuracy " << io::enum_to_string<time_accuracy>( acc );
+            [[fallthrough]];
+        case time_accuracy::NUM_TIME_ACCURACY:
+        case time_accuracy::NONE: {
+            // normalized to 100 day seasons
+            const int day_norm = ( day * 100 ) / to_days<int>( calendar::season_length() );
+            std::string seas_point;
+            if( day_norm < 33 ) {
+                //~ Estimated point in the current season
+                seas_point = pgettext( "time of season", "Early" );
+            } else if( day_norm < 66 ) {
+                //~ Estimated point in the current season
+                seas_point = pgettext( "time of season", "Mid" );
+            } else {
+                //~ Estimated point in the current season
+                seas_point = pgettext( "time of season", "Late" );
+            }
+            //~ Estimated day-of-season string: $1 = Early/Mid/Late, $2 = Spring/Summer/Fall/Winter
+            std::string season = string_format( _( "%1$s %2$s" ), seas_point,
+                                                calendar::name_season( season_of_year( turn ) ) );
+            //~ Time of year: $1 = year since Cataclysm, $2 = season
+            return string_format( _( "Year %1$d, %2$s" ), year, season );
+        }
+    }
+    return std::string();
 }
 
 time_point::time_point()

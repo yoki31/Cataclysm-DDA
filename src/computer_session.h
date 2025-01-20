@@ -2,8 +2,8 @@
 #ifndef CATA_SRC_COMPUTER_SESSION_H
 #define CATA_SRC_COMPUTER_SESSION_H
 
-#include <iosfwd>
 #include <map>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -32,7 +32,7 @@ class computer_session
 
         /** Returns true if the player successfully hacks the computer. Security = -1 defaults to
          *  the main system security. */
-        bool hack_attempt( Character &you, int Security = -1 );
+        bool hack_attempt( Character &you, int Security = -1 ) const;
 
         /**
          * Checks whether the specified action can be activated (has any effect)
@@ -102,6 +102,7 @@ class computer_session
         void action_geiger();
         void action_irradiator();
         void action_list_bionics();
+        void action_list_mutations();
         void action_lock();
         void action_map_sewer();
         void action_map_subway();

@@ -11,10 +11,12 @@ function Q {
 
 SPECIAL_OF_TERRAIN="$(mktemp --suffix -special-of-terrain.json )"
 Q 'def skip(to_skip): select(all(. != to_skip; .));
-    .[]
+    if type=="array" then .[] else . end
+	| select(type=="object")
 	| select(.type=="overmap_special")
 	| .id as $id
 	| .overmaps[].overmap
+    | select(. != null)
 	| sub("_(north|south|east|west)$"; "")
 	# Skip common terrains to prevent false positives
 	| skip("forest", "forest_thick", "forest_water", "field", "road_ew")
@@ -26,7 +28,8 @@ Q 'def skip(to_skip): select(all(. != to_skip; .));
 
 MISSING_OM_SPECIAL="$(mktemp --suffix -missing-om-special.json )"
 Q --slurpfile special_of_terrain "$SPECIAL_OF_TERRAIN" \
-   	'.[] 
+   	'if type=="array" then .[] else . end
+	| select(type=="object")
    	| select(.type=="mission_definition")
    	| .id as $id
    	| .start?.assign_mission_target?
@@ -39,7 +42,7 @@ Q --slurpfile special_of_terrain "$SPECIAL_OF_TERRAIN" \
 
 if jq --exit-status '. != []' < "$MISSING_OM_SPECIAL" > /dev/null; then
 	echo "The following missions lack .start.assign_mission_target.om_special
-See https://github.com/CleverRaven/Cataclysm-DDA/blob/master/doc/MISSIONS_JSON.md#assign_mission_target
+See https://github.com/CleverRaven/Cataclysm-DDA/blob/master/doc/JSON/MISSIONS_JSON.md#assign_mission_target
 > If the om_terrain is part of an overmap special, it's essential to specify
 > the om_special value as well--otherwise, the game will not know how to spawn
 > the entire special." >&2

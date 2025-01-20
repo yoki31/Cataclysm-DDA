@@ -6,10 +6,10 @@
 #include <iosfwd>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <vector>
 
-#include "optional.h"
 #include "type_id.h"
 
 class JsonObject;
@@ -66,6 +66,10 @@ class monfaction
 
         // temporary attitude cache, used by `attitude_rec`
         mutable mfaction_att_map attitude_map;
+        std::set<mfaction_str_id> _att_by_mood;
+        std::set<mfaction_str_id> _att_neutral;
+        std::set<mfaction_str_id> _att_friendly;
+        std::set<mfaction_str_id> _att_hate;
         // final attitude cache,
         // compact vector of attitudes towards other factions,
         // where index is other faction's `int_id`
@@ -74,7 +78,7 @@ class monfaction
 
         // attitude calculation logic
         // used internally and results is stored in attitude_vec
-        cata::optional<mf_attitude> attitude_rec( const mfaction_str_id &other ) const;
+        std::optional<mf_attitude> attitude_rec( const mfaction_str_id &other ) const;
         bool detect_base_faction_cycle( ) const;
 
         // recursively inherit `attitude_map` elements from all children
@@ -87,7 +91,7 @@ class monfaction
         void populate_attitude_vec() const;
 
         /** Load from JSON */
-        void load( const JsonObject &jo, const std::string &src );
+        void load( const JsonObject &jo, std::string_view src );
 
         friend void monfactions::finalize();
         friend class generic_factory<monfaction>;

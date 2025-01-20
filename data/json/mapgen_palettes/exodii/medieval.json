@@ -2,13 +2,13 @@
   {
     "type": "palette",
     "id": "exodii_stone_palette",
-    "//": "For medieval buildings the exodii have repurposed.",
+    "//": "For medieval buildings the Exodii have repurposed.",
     "terrain": {
       " ": [ [ "t_region_groundcover", 500 ], "t_region_tree" ],
       ".": "t_glassed_sand",
       ",": [ [ "t_glassed_sand", 3 ], "t_sandmound", "t_sand" ],
       ";": "t_sand",
-      "#": "t_drystone_wall",
+      "#": "t_rock_wall",
       "_": "t_dirtfloor",
       "-": "t_dirt",
       "2": "t_dirt",
@@ -20,7 +20,8 @@
       "|": "t_junk_wall",
       "M": "t_door_metal_c",
       "v": "t_open_air",
-      "x": "t_drystone_wall_half",
+      "S": "t_sand",
+      "x": "t_rock_wall_half",
       "4": "t_sand"
     },
     "monster": {
@@ -33,6 +34,7 @@
       "c": [ "f_metal_crate_r", "f_metal_crate_c" ],
       "C": [ "f_metal_crate_r", "f_metal_crate_c" ],
       "g": "f_capacitor",
+      "S": "f_exodii_signpost",
       "{": "f_ground_cable",
       ".": [ [ "f_null", 2000 ], [ "f_rubble_rock", 100 ] ],
       ",": [ [ "f_null", 2000 ], [ "f_rubble_rock", 100 ], [ "f_boulder_small", 12 ], "f_boulder_medium" ]

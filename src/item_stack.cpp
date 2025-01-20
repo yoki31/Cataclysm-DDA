@@ -142,8 +142,9 @@ const item *item_stack::stacks_with( const item &it ) const
     return nullptr;
 }
 
-std::list<item> item_stack::use_charges( const itype_id &type, int &quantity, const tripoint &pos,
-        const std::function<bool( const item & )> &filter )
+std::list<item> item_stack::use_charges( const itype_id &type, int &quantity,
+        const tripoint_bub_ms &pos,
+        const std::function<bool( const item & )> &filter, bool in_tools )
 {
     std::list<item> ret;
     for( auto a = this->begin(); a != this->end() && quantity > 0; ) {
@@ -151,7 +152,7 @@ std::list<item> item_stack::use_charges( const itype_id &type, int &quantity, co
         if( ( !a->made_of( phase_id::LIQUID ) ||
               ( a->made_of( phase_id::LIQUID ) &&
                 get_map().has_flag( ter_furn_flag::TFLAG_LIQUIDCONT, pos ) ) ) &&
-            a->use_charges( type, quantity, ret, pos, filter ) ) {
+            a->use_charges( type, quantity, ret, pos, filter, nullptr, in_tools ) ) {
             a = this->erase( a );
         } else {
             ++a;

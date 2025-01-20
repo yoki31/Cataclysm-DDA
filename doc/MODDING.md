@@ -1,8 +1,8 @@
-﻿# Modding guide
+# Modding guide
 
 Certain features of the game can be modified without rebuilding the game from source code. This includes professions, monsters, npcs, and more. Just modify the pertinent files and run the game to see your changes.
 
-The majority of modding is done by editing JSON files. An in-depth review of all json files and their appropriate fields is available in [JSON_INFO.md](JSON_INFO.md).
+The majority of modding is done by editing JSON files. An in-depth review of all json files and their appropriate fields is available in [JSON/JSON_INFO.md](JSON/JSON_INFO.md).
 
 ## Other guides
 
@@ -22,14 +22,34 @@ A barebones `modinfo.json` file looks like this:
   {
     "type": "MOD_INFO",
     "id": "Mod_ID",
-    "name": "Mod's Display Name",
-    "authors": [ "Your name here", "Your friend's name if you want" ],
-    "description": "Your description here",
-    "category": "content",
-    "dependencies": [ "dda" ]
+    "name": "Mod's Display Name"
   }
 ]
 ````
+
+This is the absolute bare minimum, but you may want to add `authors`(You!), a `description` and a `category`. See below for more possibilities.
+
+### All MOD_INFO fields
+Here is a full list of supported values for MOD_INFO:
+````json
+[
+  {
+    "type": "MOD_INFO",                             // Mandatory, you're making one of these!
+    "id": "Mod_ID",                                 // Mandatory, unique id for your mod. You should not use the same id as any other mod.  Cannot contain the '#' character.  Mod ids must also be valid folder pathing in order to support compatibility with other mods.
+    "name": "Mod's Display Name",                   // Mandatory.
+    "authors": [ "Me", "A really cool friend" ],    // Optional, but you probably want to put your name here. More than one entry can be added, as shown.
+    "description": "The best mod ever!",            // Optional
+    "category": "graphical",                        // Optional, see below for a full list of supported values. The category is just for information purposes, so don't worry if your mod might fit more than one category.
+    "dependencies": [ "dda" ],                      // Optional. What other mods are required for this mod to function? If your mod depends on another one to work properly, adding that mod's `id` attribute to the array causes Cataclysm to force that mod to load before yours.
+    "loading_images": [ "cool.png", "cool2.png" ],  // Optional. Filenames for any loading screen images the mod may have. Loading screens are only present on the graphical/"tiles" version. Only supports .png files. Actual loading screen image will be picked randomly from among all mod loading screens, including other loaded mods that have loading screens.
+    "version": "1.3.bacon",                         // Optional. For informational purposes only. No versioning system is provided, so whatever you put here is up to you. Feel free to name your versions after ice cream.
+    "core": false,                                  // Optional, default false. Core mods will be loaded before anything else. Used for DDA, third-party use will not be supported.
+    "obsolete": false,                              // Optional, default false. Obsolete mods are loaded for legacy saves but cannot be used when starting new worlds
+    "path": "my_mod_files/"                         // Optional, this directory relative to modinfo.json's location will be considered the mod's actual directory. e.g. if modinfo.json is located at C:\CDDA\my_mod\modinfo.json, then the mod files would be considered to be at C:\CDDA\my_mod\my_mod_files\. A file such as C:\CDDA\my_mod\some_other_file.json would be ignored, it isn't located inside the specified directory.
+  }
+]
+````
+
 The `category` attribute denotes where the mod will appear in the mod selection menu. These are the available categories to choose from, with some examples chosen from mods that existed when this document was written. Pick whichever one applies best to your mod when writing your modinfo file.
  - `content` - A mod that adds a lot of stuff. Typically reserved for large mods (eg: Core game files, Aftershock)
  - `total_conversion` - A mod that fundamentally changes the game.  In particular, the assumption is that a player should not use two total conversion mods at the same time, and so they will not be tested together.  However, nothing prevents players from using more than one if they wish. (eg: Dark Skies Above)
@@ -44,8 +64,6 @@ The `category` attribute denotes where the mod will appear in the mod selection 
  - `monster_exclude` - A mod that stops certain monster varieties from spawning in the world (eg: No fungal monsters, No monsters)
  - `graphical` - A mod that adjusts game graphics in some way (eg: Graphical overmap)
 
-The `dependencies` attribute is used to tell Cataclysm that your mod is dependent on something present in another mod. If you have no dependencies outside of the core game, then just including `dda` in the list is good enough. If your mod depends on another one to work properly, adding that mod's `id` attribute to the array causes Cataclysm to force that mod to load before yours.
-
 ## Actually adding things to your mod
 Now that you have a basic mod, you can get around to actually putting some stuff into it!
 
@@ -53,7 +71,7 @@ Now that you have a basic mod, you can get around to actually putting some stuff
 It's a good idea to put different categories of additions into different json files. Any json files that are present in the mod folder or its subfolders will be detected and read by Cataclysm, but otherwise, there are no restrictions on what you can put where.
 
 ### JSON_INFO.md
-It's worth reading [JSON_INFO.md](JSON_INFO.md) to get a comprehensive list of everything you can do with these mods. The rest of this document will have a few examples to copy and paste, but it is by no means comprehensive. The base game's data is also defined in the same way as any mod you write, so taking a look through the game's json files (in `data/json`) can also teach you a lot. If the game finds any issues in your JSON syntax when you try to load a game world, it will spit out an error message, and you won't be able to load that game until the issue is fixed.
+It's worth reading [JSON/JSON_INFO.md](JSON/JSON_INFO.md) to get a comprehensive list of everything you can do with these mods. The rest of this document will have a few examples to copy and paste, but it is by no means comprehensive. The base game's data is also defined in the same way as any mod you write, so taking a look through the game's json files (in `data/json`) can also teach you a lot. If the game finds any issues in your JSON syntax when you try to load a game world, it will spit out an error message, and you won't be able to load that game until the issue is fixed.
 
 ### Adding a scenario
 Scenarios are what the game uses to determine your general situation when you create a character. They determine when and where your character may spawn in the world, and what professions can be used. They are also used to determine whether those professions can have mutations starting out. Below you will find the JSON definition for the game's built-in `Large Building` scenario.
@@ -120,7 +138,7 @@ Professions are what the game calls the character classes you can choose from wh
 ````
 
 ### Adding an item
-Items are where you really want to read the [JSON_INFO.md](JSON_INFO.md) file, just because there's so much that you can do with them, and every category of item is a little bit different. 
+Items are where you really want to read the [JSON/JSON_INFO.md](JSON/JSON_INFO.md) file, just because there's so much that you can do with them, and every category of item is a little bit different.
 <!--I chose this one because it's about as basic an item as I could find. Everything else does something.-->
 ````json
 [
@@ -133,7 +151,7 @@ Items are where you really want to read the [JSON_INFO.md](JSON_INFO.md) file, j
     "description": "A photo of a smiling family on a camping trip.  One of the parents looks like a cleaner, happier version of the person you know.",
     "weight": "1 g",
     "volume": 0,
-    "price": 800,
+    "price": "8 USD",
     "material": [ "paper" ],
     "symbol": "*",
     "color": "light_gray"
@@ -142,7 +160,7 @@ Items are where you really want to read the [JSON_INFO.md](JSON_INFO.md) file, j
 ````
 
 ### Preventing monsters from spawning
-This kind of mod is relatively simple, but very useful. If you don't want to deal with certain types of monsters in your world, this is how you do it. You can create blacklists and whitelists to define the allowed monsters individually, by species, or by category. In order to create these you'll need the relevant identifers; look for a monster's `id`, `species`, and any `categories` in its JSON definition, which can be found in `data/json/monsters/` for the core game.
+This kind of mod is relatively simple, but very useful. If you don't want to deal with certain types of monsters in your world, this is how you do it. You can create blacklists and whitelists to define the allowed monsters individually, by species, or by category. In order to create these you'll need the relevant identifiers; look for a monster's `id`, `species`, and any `categories` in its JSON definition, which can be found in `data/json/monsters/` for the core game.
 
 Below is an excerpt from the `Mythos` mod that shows how to blacklist monsters individually and by species. This will prevent all zombies, cyborgs, and robots from spawning in-game, with fungal zombies specified by `id`.
 ````json
@@ -261,6 +279,23 @@ The format is as follows:
 Valid values for `subtype` are `whitelist` and `blacklist`.
 `scenarios` is an array of the scenario ids that you want to blacklist or whitelist.
 
+### Disabling certain professions or hobbies
+The `profession_blacklist` can be either a blacklist or a whitelist.
+When it is a whitelist, only the professions/hobbies specified may be chosen.
+No more than one blacklist can be specified at one time - this is in all json loaded for a particular game (all mods + base game), not just your specific mod.
+The format is as follows:
+```json
+[
+  {
+    "type": "profession_blacklist",
+    "subtype": "blacklist",
+    "professions": [ "caffiend", "unemployed" ]
+  }
+]
+```
+Valid values for `subtype` are `whitelist` and `blacklist`.
+`professions` is an array of the profession/hobby ids that you want to blacklist or whitelist.
+
 ### Adding dialogue to existing NPCs
 
 You can't edit existing dialog, but you can add new dialogue by adding a new response that can kick off new dialogue and missions. Here is a working example from DinoMod:
@@ -284,7 +319,7 @@ Monster stats can be adjusted using the `monster_adjustment` JSON element.
     "type": "monster_adjustment",
     "species": "ZOMBIE",
     "flag": { "name": "REVIVES", "value": false },
-	"stat": { "name": "speed", "modifier": 0.9 }
+	  "stat": { "name": "speed", "modifier": 0.9 }
   }
 ```
 Using this syntax allows modification of the following things:
@@ -294,6 +329,16 @@ Using this syntax allows modification of the following things:
 
 Currently, adjusting multiple stats or flags requires separate `monster_adjustment` entries.
 
+## External options
+
+External options control a variety of global settings not appropriate for region settings, from `SHOW_MUTATION_SELECTOR` that lets the
+player choose mutations you get on mutation, to `ETERNAL_WEATHER` which let's you pick a type of weather to always be active.
+All the external options available are located in `/core/external_options.json` along with comments explaining their purpose and their DDA values.
+To change the values in a mod you just define an identical object to the dda one with the value changed.
+
+You can also override any source defined option with an external option of the same name in the same way (Eg if the player has `AUTO_FEATURES` set to false
+but you make an external option `AUTO_FEATURES` set to true when the player loads the mod their value will be changed to true).
+**However currently on save this overrides the user's config so shouldn't be used unless necessary to make the mod work.**
 
 ## Important note on json files
 
@@ -315,3 +360,4 @@ Many editors have features that let you track `{ [` and `] }` to see if they're 
 Almost everything in this game can be modded. Almost. This section is intended to chart those areas not supported for modding to save time and headaches.
 
 The Names folder and contents (EN etcetera) confirmed 5/23/20
+Construction recipes. Can be worked around by adding requirements and modding those, confirmed 7/4/22

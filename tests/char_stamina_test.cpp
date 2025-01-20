@@ -8,12 +8,21 @@
 #include "type_id.h"
 #include "units.h"
 
+static const bionic_id bio_power_storage( "bio_power_storage" );
+static const bionic_id test_bio_limb_leg_l( "test_bio_limb_leg_l" );
+static const bionic_id test_bio_limb_leg_r( "test_bio_limb_leg_r" );
+
+static const character_modifier_id
+character_modifier_move_mode_move_cost_mod( "move_mode_move_cost_mod" );
 static const character_modifier_id
 character_modifier_stamina_move_cost_mod( "stamina_move_cost_mod" );
 static const character_modifier_id
 character_modifier_stamina_recovery_breathing_mod( "stamina_recovery_breathing_mod" );
 
 static const efftype_id effect_winded( "winded" );
+
+static const itype_id itype_scarf_fur( "scarf_fur" );
+static const itype_id itype_test_platinum_bit( "test_platinum_bit" );
 
 static const move_mode_id move_mode_crouch( "crouch" );
 static const move_mode_id move_mode_run( "run" );
@@ -69,7 +78,8 @@ static float move_cost_mod( Character &dummy, const move_mode_id &move_mode,
     REQUIRE( dummy.get_stamina() == new_stamina );
 
     // The point of it all: move cost modifier
-    return dummy.get_modifier( character_modifier_stamina_move_cost_mod );
+    return dummy.get_modifier( character_modifier_stamina_move_cost_mod ) * dummy.get_modifier(
+               character_modifier_move_mode_move_cost_mod );
 }
 
 // Return amount of stamina burned per turn by `burn_move_stamina` in the given movement mode.
@@ -88,7 +98,7 @@ static int actual_burn_rate( Character &dummy, const move_mode_id &move_mode )
     int before_stam = dummy.get_stamina();
     dummy.burn_move_stamina( to_moves<int>( 1_turns ) );
     int after_stam = dummy.get_stamina();
-    REQUIRE( before_stam > after_stam );
+    REQUIRE( before_stam >= after_stam );
 
     // How much stamina was actually burned?
     return before_stam - after_stam;
@@ -105,7 +115,7 @@ static void burden_player( Character &dummy, float burden_proportion )
 
     // Add a pile of test platinum bits (1g/unit) to reach the desired weight capacity
     if( burden_proportion > 0.0 ) {
-        item pile( "test_platinum_bit", calendar::turn, units );
+        item pile( itype_test_platinum_bit, calendar::turn, units );
         dummy.i_add( pile );
     }
 
@@ -137,10 +147,38 @@ static float actual_regen_rate( Character &dummy, int turns )
     return after_stam - before_stam;
 }
 
+static int one_bionic_burn_rate( Character &dummy, const move_mode_id &move_mode )
+{
+    clear_avatar();
+    dummy.add_bionic( bio_power_storage );
+    dummy.add_bionic( test_bio_limb_leg_l );
+    dummy.set_power_level( dummy.get_max_power_level() );
+
+    // confirm that we have the bionic and that our limb is missing
+    REQUIRE( dummy.has_bionic( test_bio_limb_leg_l ) );
+    REQUIRE( dummy.get_cached_organic_size() == 0.85f );
+    return actual_burn_rate( dummy, move_mode );
+}
+
+static int two_bionic_burn_rate( Character &dummy, const move_mode_id &move_mode )
+{
+    clear_avatar();
+    dummy.add_bionic( bio_power_storage );
+    dummy.add_bionic( test_bio_limb_leg_l );
+    dummy.add_bionic( test_bio_limb_leg_r );
+    dummy.set_power_level( dummy.get_max_power_level() );
+
+    // confirm that we have the bionics and that our limbs are missing
+    REQUIRE( dummy.has_bionic( test_bio_limb_leg_l ) );
+    REQUIRE( dummy.has_bionic( test_bio_limb_leg_r ) );
+    REQUIRE( dummy.get_cached_organic_size() == 0.70f );
+    return actual_burn_rate( dummy, move_mode );
+}
+
 // Test cases
 // ----------
 
-TEST_CASE( "stamina movement cost modifier", "[stamina][cost]" )
+TEST_CASE( "stamina_movement_cost_modifier", "[stamina][cost]" )
 {
     Character &dummy = get_player_character();
 
@@ -187,7 +225,7 @@ TEST_CASE( "stamina movement cost modifier", "[stamina][cost]" )
     }
 }
 
-TEST_CASE( "modify character stamina", "[stamina][modify]" )
+TEST_CASE( "modify_character_stamina", "[stamina][modify]" )
 {
     Character &dummy = get_player_character();
     clear_avatar();
@@ -262,7 +300,7 @@ TEST_CASE( "modify character stamina", "[stamina][modify]" )
     }
 }
 
-TEST_CASE( "stamina burn for movement", "[stamina][burn][move]" )
+TEST_CASE( "stamina_burn_for_movement", "[stamina][burn][move]" )
 {
     Character &dummy = get_player_character();
 
@@ -323,9 +361,19 @@ TEST_CASE( "stamina burn for movement", "[stamina][burn][move]" )
             CHECK( burdened_burn_rate( dummy, move_mode_crouch, 2.00 ) == ( normal_burn_rate + 100 ) / 2 );
         }
     }
+
+    GIVEN( "player has bionic limbs which will spend power instead of stamina" ) {
+        THEN( "having one bionic leg means half the stamina cost" ) {
+            CHECK( one_bionic_burn_rate( dummy, move_mode_walk ) == normal_burn_rate / 2 );
+        }
+
+        THEN( "having two bionic legs means movement takes no stamina" ) {
+            CHECK( two_bionic_burn_rate( dummy, move_mode_walk ) == 0 );
+        }
+    }
 }
 
-TEST_CASE( "burning stamina when overburdened may cause pain", "[stamina][burn][pain]" )
+TEST_CASE( "burning_stamina_when_overburdened_may_cause_pain", "[stamina][burn][pain]" )
 {
     Character &dummy = get_player_character();
     int pain_before;
@@ -368,7 +416,7 @@ TEST_CASE( "burning stamina when overburdened may cause pain", "[stamina][burn][
     }
 }
 
-TEST_CASE( "stamina regeneration rate", "[stamina][update][regen]" )
+TEST_CASE( "stamina_regeneration_rate", "[stamina][update][regen]" )
 {
     Character &dummy = get_player_character();
     clear_avatar();
@@ -397,7 +445,7 @@ TEST_CASE( "stamina regeneration rate", "[stamina][update][regen]" )
     }
 }
 
-TEST_CASE( "stamina regen in different movement modes", "[stamina][update][regen][mode]" )
+TEST_CASE( "stamina_regen_in_different_movement_modes", "[stamina][update][regen][mode]" )
 {
     Character &dummy = get_player_character();
     clear_avatar();
@@ -433,7 +481,7 @@ TEST_CASE( "stamina regen in different movement modes", "[stamina][update][regen
     }
 }
 
-TEST_CASE( "stamina regen with mouth encumbrance", "[stamina][update][regen][encumbrance]" )
+TEST_CASE( "stamina_regen_with_mouth_encumbrance", "[stamina][update][regen][encumbrance]" )
 {
     Character &dummy = get_player_character();
     clear_avatar();
@@ -458,7 +506,7 @@ TEST_CASE( "stamina regen with mouth encumbrance", "[stamina][update][regen][enc
     }
 
     GIVEN( "character has mouth encumbrance" ) {
-        dummy.wear_item( item( "scarf_fur" ) );
+        dummy.wear_item( item( itype_scarf_fur ) );
         REQUIRE( dummy.encumb( bodypart_id( "mouth" ) ) == 10 );
 
         THEN( "stamina regen is reduced" ) {
@@ -469,7 +517,7 @@ TEST_CASE( "stamina regen with mouth encumbrance", "[stamina][update][regen][enc
 
         WHEN( "they have even more mouth encumbrance" ) {
             // Layering two scarves triples the encumbrance
-            dummy.wear_item( item( "scarf_fur" ) );
+            dummy.wear_item( item( itype_scarf_fur ) );
             REQUIRE( dummy.encumb( bodypart_id( "mouth" ) ) == 30 );
 
             THEN( "stamina regen is reduced further" ) {

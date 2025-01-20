@@ -3,12 +3,15 @@
     "type": "terrain",
     "id": "t_palisade_gate",
     "name": "palisade gate",
-    "description": "A large doorway consisting of long logs cabled together, that could be expanded upon.  Can act as a door if some type of pulley system were rigged on an adjacent palisade wall.",
+    "description": "A large doorway consisting of long logs cabled together, best used as part of a longer wall.  Can act as a door if some type of pulley system were rigged on an adjacent palisade wall.",
     "symbol": "+",
     "color": "light_red",
     "move_cost": 0,
     "coverage": 55,
-    "flags": [ "FLAMMABLE", "NOITEM", "DOOR", "CONNECT_TO_WALL", "WALL", "REDUCE_SCENT", "BLOCK_WIND", "BURROWABLE" ],
+    "connect_groups": "WALL",
+    "connects_to": "WALL",
+    "rotates_to": "INDOORFLOOR",
+    "flags": [ "FLAMMABLE", "NOITEM", "DOOR", "WALL", "REDUCE_SCENT", "BLOCK_WIND", "BURROWABLE" ],
     "bash": {
       "str_min": 24,
       "str_max": 150,
@@ -22,11 +25,13 @@
     "type": "terrain",
     "id": "t_palisade_gate_o",
     "name": "open palisade gate",
-    "description": "A hanging palisade gate, hoisted by a nearby pulley system.  Probably shouldn't be underneath when it comes down.",
+    "description": "A hanging palisade gate, hoisted by a nearby pulley system.  You probably shouldn't be underneath when it comes down.",
     "symbol": ".",
     "color": "brown",
     "move_cost": 2,
-    "flags": [ "TRANSPARENT", "FLAMMABLE", "FLAT", "CONNECT_TO_WALL", "BURROWABLE" ],
+    "connect_groups": "WALL",
+    "connects_to": "WALL",
+    "flags": [ "TRANSPARENT", "FLAMMABLE", "FLAT", "BURROWABLE", "PERMEABLE" ],
     "bash": {
       "str_min": 6,
       "str_max": 150,
@@ -40,11 +45,13 @@
     "type": "terrain",
     "id": "t_portcullis",
     "name": "makeshift portcullis",
-    "description": "An immense gateway scrapped together with various bits of steel and metal scraps.",
+    "description": "An immense gateway cobbled together from various bits of steel and metal scraps.",
     "symbol": "&",
     "color": "cyan",
     "move_cost": 0,
-    "flags": [ "TRANSPARENT", "NOITEM", "PERMEABLE", "CONNECT_TO_WALL", "MINEABLE", "BURROWABLE" ],
+    "connect_groups": "WALL",
+    "connects_to": "WALL",
+    "flags": [ "TRANSPARENT", "NOITEM", "PERMEABLE", "MINEABLE", "BURROWABLE" ],
     "bash": {
       "str_min": 60,
       "str_max": 210,
@@ -73,18 +80,19 @@
       "byproducts": [ { "item": "scrap", "count": 3 } ]
     },
     "flags": [ "TRANSPARENT", "PERMEABLE", "LOCKED", "PICKABLE", "THIN_OBSTACLE", "BURROWABLE" ],
+    "connect_groups": "CHAINFENCE",
     "connects_to": "CHAINFENCE",
     "examine_action": "locked_object_pickable",
     "oxytorch": {
       "result": "t_dirt",
       "duration": "9 seconds",
-      "byproducts": [ { "item": "pipe", "count": [ 1, 4 ] }, { "item": "wire", "count": [ 4, 16 ] } ]
+      "byproducts": [ { "item": "pipe", "count": [ 1, 4 ] }, { "item": "lc_wire", "count": [ 4, 16 ] } ]
     },
     "hacksaw": {
       "result": "t_dirt",
       "duration": "10 minutes",
       "message": "You finish cutting the metal.",
-      "byproducts": [ { "item": "pipe", "count": 6 }, { "item": "steel_chunk", "count": 20 } ]
+      "byproducts": [ { "item": "pipe", "count": 6 }, { "item": "lc_wire", "count": [ 4, 20 ] } ]
     },
     "bash": {
       "str_min": 10,
@@ -94,7 +102,7 @@
       "sound": "metal screeching!",
       "sound_fail": "clang!",
       "ter_set": "t_null",
-      "items": [ { "item": "wire", "count": [ 8, 20 ] }, { "item": "scrap", "count": [ 0, 12 ] } ]
+      "items": [ { "item": "lc_wire", "count": [ 8, 20 ] }, { "item": "scrap", "count": [ 0, 12 ] } ]
     }
   },
   {
@@ -105,19 +113,21 @@
     "symbol": "+",
     "color": "cyan",
     "move_cost": 0,
+    "rotates_to": "INDOORFLOOR",
     "flags": [ "TRANSPARENT", "DOOR", "PERMEABLE", "THIN_OBSTACLE", "BURROWABLE" ],
+    "connect_groups": "CHAINFENCE",
     "connects_to": "CHAINFENCE",
     "oxytorch": {
       "result": "t_dirt",
       "duration": "9 seconds",
-      "byproducts": [ { "item": "pipe", "count": [ 1, 4 ] }, { "item": "wire", "count": [ 4, 16 ] } ]
+      "byproducts": [ { "item": "pipe", "count": [ 1, 4 ] }, { "item": "lc_wire", "count": [ 4, 16 ] } ]
     },
     "open": "t_chaingate_o",
     "hacksaw": {
       "result": "t_dirt",
       "duration": "10 minutes",
       "message": "You finish cutting the metal.",
-      "byproducts": [ { "item": "pipe", "count": 6 }, { "item": "steel_chunk", "count": 20 } ]
+      "byproducts": [ { "item": "pipe", "count": 6 }, { "item": "lc_wire", "count": [ 4, 20 ] } ]
     },
     "bash": {
       "str_min": 10,
@@ -128,7 +138,7 @@
       "sound_fail": "clang!",
       "ter_set": "t_null",
       "items": [
-        { "item": "wire", "count": [ 6, 15 ] },
+        { "item": "lc_wire", "count": [ 6, 15 ] },
         { "item": "pipe", "count": [ 6, 15 ] },
         { "item": "scrap", "count": [ 0, 12 ] }
       ]
@@ -142,9 +152,21 @@
     "symbol": ".",
     "color": "cyan",
     "move_cost": 2,
-    "flags": [ "TRANSPARENT", "FLAT", "ROAD", "BURROWABLE" ],
+    "flags": [ "TRANSPARENT", "FLAT", "ROAD", "BURROWABLE", "PERMEABLE" ],
+    "connect_groups": "CHAINFENCE",
     "connects_to": "CHAINFENCE",
     "close": "t_chaingate_c",
+    "oxytorch": {
+      "result": "t_dirt",
+      "duration": "9 seconds",
+      "byproducts": [ { "item": "pipe", "count": [ 1, 4 ] }, { "item": "lc_wire", "count": [ 4, 16 ] } ]
+    },
+    "hacksaw": {
+      "result": "t_dirt",
+      "duration": "10 minutes",
+      "message": "You finish cutting the metal.",
+      "byproducts": [ { "item": "pipe", "count": 6 }, { "item": "lc_wire", "count": [ 4, 20 ] } ]
+    },
     "bash": {
       "str_min": 5,
       "str_max": 150,
@@ -152,7 +174,7 @@
       "sound_fail": "clang!",
       "ter_set": "t_null",
       "items": [
-        { "item": "wire", "count": [ 6, 15 ] },
+        { "item": "lc_wire", "count": [ 6, 15 ] },
         { "item": "pipe", "count": [ 6, 15 ] },
         { "item": "scrap", "count": [ 0, 12 ] }
       ]
@@ -170,9 +192,10 @@
       "result": "t_strconc_floor",
       "duration": "10 minutes",
       "message": "You finish cutting the metal.",
-      "byproducts": [ { "item": "chain", "count": [ 1, 2 ] }, { "item": "wire", "count": [ 8, 22 ] } ]
+      "byproducts": [ { "item": "chain", "count": [ 1, 2 ] }, { "item": "lc_wire", "count": [ 8, 22 ] } ]
     },
     "flags": [ "TRANSPARENT", "PERMEABLE", "LOCKED", "PICKABLE", "THIN_OBSTACLE" ],
+    "connect_groups": "WALL",
     "connects_to": "WALL",
     "examine_action": "locked_object_pickable",
     "lockpick_result": "t_retractable_gate_c",
@@ -180,7 +203,7 @@
     "oxytorch": {
       "result": "t_strconc_floor",
       "duration": "9 seconds",
-      "byproducts": [ { "item": "chain", "count": [ 1, 2 ] }, { "item": "wire", "count": [ 8, 22 ] } ]
+      "byproducts": [ { "item": "chain", "count": [ 1, 2 ] }, { "item": "lc_wire", "count": [ 8, 22 ] } ]
     },
     "bash": {
       "str_min": 17,
@@ -191,7 +214,7 @@
       "sound_fail": "clang!",
       "ter_set": "t_null",
       "items": [
-        { "item": "wire", "count": [ 8, 20 ] },
+        { "item": "lc_wire", "count": [ 8, 20 ] },
         { "item": "chain", "count": [ 1, 2 ] },
         { "item": "scrap", "count": [ 0, 12 ] }
       ]
@@ -205,19 +228,21 @@
     "symbol": "+",
     "color": "cyan",
     "move_cost": 0,
+    "rotates_to": "INDOORFLOOR",
     "flags": [ "TRANSPARENT", "DOOR", "PERMEABLE", "THIN_OBSTACLE" ],
+    "connect_groups": "WALL",
     "connects_to": "WALL",
     "hacksaw": {
       "result": "t_strconc_floor",
       "duration": "10 minutes",
       "message": "You finish cutting the metal.",
-      "byproducts": [ { "item": "chain", "count": [ 1, 2 ] }, { "item": "wire", "count": [ 8, 22 ] } ]
+      "byproducts": [ { "item": "chain", "count": [ 1, 2 ] }, { "item": "lc_wire", "count": [ 8, 22 ] } ]
     },
     "open": "t_retractable_gate_o",
     "oxytorch": {
       "result": "t_strconc_floor",
       "duration": "9 seconds",
-      "byproducts": [ { "item": "chain", "count": [ 1, 2 ] }, { "item": "wire", "count": [ 8, 22 ] } ]
+      "byproducts": [ { "item": "chain", "count": [ 1, 2 ] }, { "item": "lc_wire", "count": [ 8, 22 ] } ]
     },
     "bash": {
       "str_min": 17,
@@ -228,7 +253,7 @@
       "sound_fail": "clang!",
       "ter_set": "t_null",
       "items": [
-        { "item": "wire", "count": [ 6, 15 ] },
+        { "item": "lc_wire", "count": [ 6, 15 ] },
         { "item": "chain", "count": [ 1, 2 ] },
         { "item": "scrap", "count": [ 0, 12 ] }
       ]
@@ -242,7 +267,8 @@
     "symbol": ".",
     "color": "cyan",
     "move_cost": 2,
-    "flags": [ "TRANSPARENT", "FLAT", "ROAD" ],
+    "flags": [ "TRANSPARENT", "FLAT", "ROAD", "PERMEABLE" ],
+    "connect_groups": "WALL",
     "connects_to": "WALL",
     "close": "t_retractable_gate_c",
     "bash": {
@@ -252,7 +278,7 @@
       "sound_fail": "clang!",
       "ter_set": "t_null",
       "items": [
-        { "item": "wire", "count": [ 6, 15 ] },
+        { "item": "lc_wire", "count": [ 6, 15 ] },
         { "item": "pipe", "count": [ 6, 15 ] },
         { "item": "scrap", "count": [ 0, 12 ] }
       ]
@@ -267,7 +293,9 @@
     "color": "brown",
     "move_cost": 3,
     "coverage": 60,
-    "flags": [ "TRANSPARENT", "FLAMMABLE_ASH", "DOOR", "MOUNTABLE", "BURROWABLE" ],
+    "rotates_to": "INDOORFLOOR",
+    "flags": [ "TRANSPARENT", "FLAMMABLE_ASH", "DOOR", "MOUNTABLE", "BURROWABLE", "PERMEABLE" ],
+    "connect_groups": "WOODFENCE",
     "connects_to": "WOODFENCE",
     "open": "t_fencegate_o",
     "deconstruct": {
@@ -303,7 +331,8 @@
     "symbol": ".",
     "color": "brown",
     "move_cost": 2,
-    "flags": [ "TRANSPARENT", "FLAMMABLE_ASH", "FLAT", "ROAD", "BURROWABLE" ],
+    "flags": [ "TRANSPARENT", "FLAMMABLE_ASH", "FLAT", "ROAD", "BURROWABLE", "PERMEABLE" ],
+    "connect_groups": "WOODFENCE",
     "connects_to": "WOODFENCE",
     "close": "t_fencegate_c",
     "deconstruct": {
@@ -338,7 +367,10 @@
     "color": "brown",
     "looks_like": "t_chickenwire_gate_c",
     "move_cost": 0,
-    "flags": [ "TRANSPARENT", "DOOR", "PERMEABLE", "BURROWABLE", "CONNECT_TO_WALL" ],
+    "connect_groups": "WALL",
+    "connects_to": "WALL",
+    "rotates_to": "INDOORFLOOR",
+    "flags": [ "TRANSPARENT", "DOOR", "PERMEABLE", "BURROWABLE" ],
     "open": "t_screen_door_o",
     "deconstruct": {
       "ter_set": "t_floor",
@@ -368,12 +400,14 @@
     "type": "terrain",
     "id": "t_screen_door_o",
     "name": "open screen door",
-    "description": "A simple wooden doorway with screen mesh.",
+    "description": "A simple wooden doorway with screen mesh.  The door is open.",
     "symbol": ".",
     "color": "brown",
     "looks_like": "t_chickenwire_gate_o",
     "move_cost": 2,
-    "flags": [ "TRANSPARENT", "PERMEABLE", "BURROWABLE", "CONNECT_TO_WALL" ],
+    "connect_groups": "WALL",
+    "connects_to": "WALL",
+    "flags": [ "TRANSPARENT", "FLAT", "PERMEABLE", "BURROWABLE" ],
     "close": "t_screen_door_c",
     "deconstruct": {
       "ter_set": "t_floor",
@@ -408,14 +442,16 @@
     "color": "brown",
     "looks_like": "t_chaingate_c",
     "move_cost": 0,
+    "rotates_to": "INDOORFLOOR",
     "flags": [ "TRANSPARENT", "DOOR", "PERMEABLE", "BURROWABLE" ],
+    "connect_groups": "CHAINFENCE",
     "connects_to": "CHAINFENCE",
     "open": "t_chickenwire_gate_o",
     "deconstruct": {
       "ter_set": "t_dirt",
       "items": [
         { "item": "2x4", "count": 5 },
-        { "item": "wire", "count": 10 },
+        { "item": "lc_wire", "count": 10 },
         { "item": "nail", "charges": 20 },
         { "item": "hinge", "count": [ 1, 2 ] }
       ]
@@ -428,7 +464,11 @@
       "sound": "rattle!",
       "sound_fail": "thump!",
       "ter_set": "t_null",
-      "items": [ { "item": "wire", "count": [ 4, 6 ] }, { "item": "2x4", "count": [ 2, 4 ] }, { "item": "hinge", "count": [ 1, 2 ] } ]
+      "items": [
+        { "item": "lc_wire", "count": [ 4, 6 ] },
+        { "item": "2x4", "count": [ 2, 4 ] },
+        { "item": "hinge", "count": [ 1, 2 ] }
+      ]
     }
   },
   {
@@ -440,14 +480,15 @@
     "color": "brown",
     "looks_like": "t_chaingate_o",
     "move_cost": 2,
-    "flags": [ "TRANSPARENT", "FLAT", "ROAD", "BURROWABLE" ],
+    "flags": [ "TRANSPARENT", "FLAT", "ROAD", "BURROWABLE", "PERMEABLE" ],
+    "connect_groups": "CHAINFENCE",
     "connects_to": "CHAINFENCE",
     "close": "t_chickenwire_gate_c",
     "deconstruct": {
       "ter_set": "t_dirt",
       "items": [
         { "item": "2x4", "count": 5 },
-        { "item": "wire", "count": 10 },
+        { "item": "lc_wire", "count": 10 },
         { "item": "nail", "charges": 20 },
         { "item": "hinge", "count": [ 1, 2 ] }
       ]
@@ -458,16 +499,19 @@
       "sound": "rattle!",
       "sound_fail": "thump!",
       "ter_set": "t_null",
-      "items": [ { "item": "wire", "count": [ 4, 6 ] }, { "item": "2x4", "count": [ 2, 4 ] }, { "item": "hinge", "count": [ 1, 2 ] } ]
+      "items": [
+        { "item": "lc_wire", "count": [ 4, 6 ] },
+        { "item": "2x4", "count": [ 2, 4 ] },
+        { "item": "hinge", "count": [ 1, 2 ] }
+      ]
     }
   },
   {
     "type": "terrain",
     "id": "t_fence",
-    "alias": [ "t_fence_h", "t_fence_v" ],
     "name": "picket fence",
     "description": "A barrier made of wood, it's nothing complicated.  Mildly suggests where not to go.",
-    "symbol": "LINE_OXOX",
+    "symbol": "#",
     "color": "brown",
     "move_cost": 3,
     "flags": [
@@ -480,8 +524,10 @@
       "MOUNTABLE",
       "SHORT",
       "AUTO_WALL_SYMBOL",
-      "BURROWABLE"
+      "BURROWABLE",
+      "PERMEABLE"
     ],
+    "connect_groups": "WOODFENCE",
     "connects_to": "WOODFENCE",
     "deconstruct": { "ter_set": "t_fence_post", "items": [ { "item": "2x4", "count": 5 }, { "item": "nail", "charges": 8 } ] },
     "bash": {
@@ -503,10 +549,9 @@
   {
     "type": "terrain",
     "id": "t_wattle_fence",
-    "alias": [ "t_wattle_fence_h", "t_wattle_fence_v" ],
     "name": "woven wattle fence",
     "description": "A flimsy barrier made of woven sticks.  Suitable for small animals.",
-    "symbol": "LINE_OXOX",
+    "symbol": "#",
     "color": "brown",
     "looks_like": "t_fence",
     "move_cost": 0,
@@ -524,6 +569,7 @@
       "AUTO_WALL_SYMBOL",
       "BURROWABLE"
     ],
+    "connect_groups": "WOODFENCE",
     "connects_to": "WOODFENCE",
     "deconstruct": { "ter_set": "t_fence_post", "items": [ { "item": "splinter", "count": 20 } ] },
     "bash": {
@@ -544,7 +590,7 @@
     "color": "brown",
     "looks_like": "t_fence_post",
     "move_cost": 2,
-    "flags": [ "TRANSPARENT", "THIN_OBSTACLE", "SHORT" ],
+    "flags": [ "TRANSPARENT", "THIN_OBSTACLE", "SHORT", "PERMEABLE" ],
     "bash": {
       "str_min": 4,
       "str_max": 20,
@@ -557,31 +603,31 @@
   {
     "type": "terrain",
     "id": "t_chainfence",
-    "alias": [ "t_chainfence_h", "t_chainfence_v" ],
     "name": "chain link fence",
-    "description": "A tall fence made of woven wires.  It doesn't suggest to stop, it just stops.",
-    "symbol": "LINE_OXOX",
+    "description": "A tall fence made of woven wires.  There aren't any gaps big enough for you to fit through, so you'll have to cut it, climb it, or find a way around.",
+    "symbol": "#",
     "color": "cyan",
     "move_cost": 0,
     "boltcut": {
       "result": "t_chainfence_posts",
       "duration": "5 seconds",
       "sound": "Snick, snick, gachunk!",
-      "byproducts": [ { "item": "wire", "count": 20 } ]
+      "byproducts": [ { "item": "lc_wire", "count": 20 } ]
     },
     "flags": [ "TRANSPARENT", "NOITEM", "THIN_OBSTACLE", "PERMEABLE", "UNSTABLE", "CLIMBABLE", "AUTO_WALL_SYMBOL", "BURROWABLE" ],
+    "connect_groups": "CHAINFENCE",
     "connects_to": "CHAINFENCE",
     "examine_action": "chainfence",
     "oxytorch": {
       "result": "t_dirt",
       "duration": "9 seconds",
-      "byproducts": [ { "item": "pipe", "count": [ 1, 4 ] }, { "item": "wire", "count": [ 4, 16 ] } ]
+      "byproducts": [ { "item": "pipe", "count": [ 1, 4 ] }, { "item": "lc_wire", "count": [ 4, 16 ] } ]
     },
     "hacksaw": {
       "result": "t_dirt",
       "duration": "10 minutes",
       "message": "You finish cutting the metal.",
-      "byproducts": [ { "item": "pipe", "count": 6 }, { "item": "steel_chunk", "count": 20 } ]
+      "byproducts": [ { "item": "pipe", "count": 6 }, { "item": "lc_wire", "count": [ 4, 16 ] } ]
     },
     "bash": {
       "str_min": 10,
@@ -589,14 +635,14 @@
       "sound": "metal screeching!",
       "sound_fail": "clang!",
       "ter_set": "t_chainfence_posts",
-      "items": [ { "item": "wire", "count": [ 8, 15 ] } ]
+      "items": [ { "item": "lc_wire", "count": [ 8, 15 ] } ]
     }
   },
   {
     "type": "terrain",
     "id": "t_chainfence_posts",
     "name": "metal post",
-    "description": "Set of metal posts, that can hold more serious fences.",
+    "description": "A set of metal posts that can hold more serious fences.",
     "symbol": "#",
     "color": "cyan",
     "move_cost": 2,
@@ -606,7 +652,7 @@
       "message": "You finish cutting the metal.",
       "byproducts": [ { "item": "pipe", "count": 6 } ]
     },
-    "flags": [ "TRANSPARENT", "THIN_OBSTACLE" ],
+    "flags": [ "TRANSPARENT", "THIN_OBSTACLE", "PERMEABLE" ],
     "oxytorch": { "result": "t_dirt", "duration": "1 seconds", "byproducts": [ { "item": "pipe", "count": [ 1, 4 ] } ] },
     "bash": {
       "str_min": 8,
@@ -624,19 +670,19 @@
   {
     "type": "terrain",
     "id": "t_chickenwire_fence",
-    "alias": [ "t_chickenwire_fence_h", "t_chickenwire_fence_v" ],
     "name": "chickenwire fence",
-    "description": "A rather flimsy tall fence made of 2x4s and woven wire, suitable for containing small livestock like chickens.",
-    "symbol": "LINE_OXOX",
+    "description": "A tall, rather flimsy fence made of planks and woven wire, suitable for containing small livestock like chickens.",
+    "symbol": "#",
     "color": "brown",
     "looks_like": "t_chainfence",
     "move_cost": 0,
     "flags": [ "TRANSPARENT", "NOITEM", "PERMEABLE", "AUTO_WALL_SYMBOL", "BURROWABLE", "CLIMBABLE" ],
+    "connect_groups": "CHAINFENCE",
     "connects_to": "CHAINFENCE",
     "examine_action": "chainfence",
     "deconstruct": {
       "ter_set": "t_chickenwire_fence_post",
-      "items": [ { "item": "wire", "count": 10 }, { "item": "nail", "charges": 20 } ]
+      "items": [ { "item": "lc_wire", "count": 10 }, { "item": "nail", "charges": 20 } ]
     },
     "bash": {
       "str_min": 5,
@@ -644,22 +690,22 @@
       "sound": "metal rattling!",
       "sound_fail": "whack!",
       "ter_set": "t_chickenwire_fence_post",
-      "items": [ { "item": "wire", "count": [ 5, 10 ] } ]
+      "items": [ { "item": "lc_wire", "count": [ 5, 10 ] } ]
     }
   },
   {
     "type": "terrain",
     "id": "t_screened_porch_wall",
     "name": "screen mesh wall",
-    "description": "A rather flimsy tall wall made of 2x4s and screen mesh, suitable for keeping the bugs out.",
-    "symbol": "LINE_OXOX",
+    "description": "A tall, rather flimsy wall made of planks and screen mesh, suitable for keeping the bugs out.",
+    "symbol": "#",
     "color": "brown",
     "looks_like": "t_chickenwire_fence",
     "move_cost": 0,
     "flags": [ "TRANSPARENT", "NOITEM", "PERMEABLE", "AUTO_WALL_SYMBOL", "BURROWABLE", "AUTO_WALL_SYMBOL" ],
     "deconstruct": {
       "ter_set": "t_floor",
-      "items": [ { "item": "screen_mesh", "count": 1 }, { "item": "nail", "charges": 10 }, { "item": "2x4", "charges": 4 } ]
+      "items": [ { "item": "screen_mesh", "count": 1 }, { "item": "nail", "charges": 10 }, { "item": "2x4", "count": 4 } ]
     },
     "bash": {
       "str_min": 5,
@@ -678,12 +724,12 @@
     "type": "terrain",
     "id": "t_chickenwire_fence_post",
     "name": "chickenwire fence post",
-    "description": "A couple of posts that support the fence.  They look alone without the fence.",
+    "description": "A couple of posts that can support a fence.  They look lonely without the fence.",
     "symbol": "#",
     "color": "brown",
     "looks_like": "t_fence_post",
     "move_cost": 2,
-    "flags": [ "TRANSPARENT", "THIN_OBSTACLE" ],
+    "flags": [ "TRANSPARENT", "THIN_OBSTACLE", "PERMEABLE" ],
     "deconstruct": { "ter_set": "t_dirt", "items": [ { "item": "2x4", "count": 2 } ] },
     "bash": {
       "str_min": 8,
@@ -698,11 +744,11 @@
     "type": "terrain",
     "id": "t_fence_post",
     "name": "fence post",
-    "description": "A couple of posts that support the fence.  They look alone without the fence.",
+    "description": "A couple of posts that can support a fence.  They look lonely without the fence.",
     "symbol": "#",
     "color": "brown",
-    "move_cost": 2,
-    "flags": [ "TRANSPARENT", "THIN_OBSTACLE", "SHORT" ],
+    "move_cost": 3,
+    "flags": [ "TRANSPARENT", "WALL", "PERMEABLE", "THIN_OBSTACLE" ],
     "deconstruct": { "ter_set": "t_dirt", "items": [ { "item": "pointy_stick", "count": 2 } ] },
     "bash": {
       "str_min": 8,
@@ -721,13 +767,13 @@
     "symbol": "$",
     "color": "blue",
     "move_cost": 4,
-    "flags": [ "TRANSPARENT", "THIN_OBSTACLE", "SHORT", "EASY_DECONSTRUCT", "BURROWABLE" ],
-    "deconstruct": { "ter_set": "t_fence_post", "items": [ { "item": "wire", "count": 2 } ] },
+    "flags": [ "TRANSPARENT", "THIN_OBSTACLE", "SHORT", "EASY_DECONSTRUCT", "BURROWABLE", "PERMEABLE" ],
+    "deconstruct": { "ter_set": "t_fence_post", "items": [ { "item": "lc_wire", "count": 2 } ] },
     "boltcut": {
       "result": "t_fence_post",
       "duration": "10 seconds",
       "sound": "Snick, snick, gachunk!",
-      "byproducts": [ { "item": "wire", "count": 2 } ]
+      "byproducts": [ { "item": "lc_wire", "count": 2 } ]
     },
     "bash": {
       "str_min": 8,
@@ -735,14 +781,14 @@
       "sound": "crack.",
       "sound_fail": "whump.",
       "ter_set": "t_null",
-      "items": [ { "item": "pointy_stick", "count": [ 0, 2 ] }, { "item": "wire", "count": [ 0, 2 ] } ]
+      "items": [ { "item": "pointy_stick", "count": [ 0, 2 ] }, { "item": "lc_wire", "count": [ 0, 2 ] } ]
     }
   },
   {
     "type": "terrain",
     "id": "t_fence_barbed",
     "name": "barbed wire fence",
-    "description": "A barrier made of sharp barbed wire.  More persuasive brother of wire fence.",
+    "description": "A barrier made of sharp barbed wire.  The more persuasive brother of the wire fence.",
     "symbol": "$",
     "color": "blue",
     "move_cost": 4,
@@ -752,7 +798,7 @@
       "sound": "Snick, snick, gachunk!",
       "byproducts": [ { "item": "wire_barbed", "count": 2 } ]
     },
-    "flags": [ "TRANSPARENT", "SHARP", "THIN_OBSTACLE", "SHORT", "EASY_DECONSTRUCT", "BURROWABLE" ],
+    "flags": [ "TRANSPARENT", "SHARP", "THIN_OBSTACLE", "SHORT", "EASY_DECONSTRUCT", "BURROWABLE", "PERMEABLE" ],
     "deconstruct": { "ter_set": "t_fence_post", "items": [ { "item": "wire_barbed", "count": 2 } ] },
     "bash": {
       "str_min": 8,
@@ -771,7 +817,7 @@
     "symbol": "$",
     "color": "brown",
     "move_cost": 3,
-    "flags": [ "TRANSPARENT", "THIN_OBSTACLE", "EASY_DECONSTRUCT", "BURROWABLE" ],
+    "flags": [ "TRANSPARENT", "THIN_OBSTACLE", "EASY_DECONSTRUCT", "BURROWABLE", "PERMEABLE" ],
     "deconstruct": { "ter_set": "t_fence_post", "items": [ { "item": "rope_6", "count": 2 } ] },
     "bash": {
       "str_min": 8,
@@ -789,10 +835,9 @@
   {
     "type": "terrain",
     "id": "t_splitrail_fence",
-    "alias": [ "t_splitrail_fence_h", "t_splitrail_fence_v" ],
     "name": "split rail fence",
-    "description": "A rather stout fence made of 2x4s and fence posts, suitable for containing livestock like horses, cows and pigs.",
-    "symbol": "LINE_OXOX",
+    "description": "A rather stout fence made of planks and fence posts, suitable for containing livestock like horses, cows and pigs.",
+    "symbol": "#",
     "color": "brown",
     "looks_like": "t_fence",
     "move_cost": 0,
@@ -807,6 +852,7 @@
       "AUTO_WALL_SYMBOL",
       "BURROWABLE"
     ],
+    "connect_groups": "WOODFENCE",
     "connects_to": "WOODFENCE",
     "deconstruct": { "ter_set": "t_fence_post", "items": [ { "item": "2x4", "count": 2 }, { "item": "nail", "charges": 20 } ] },
     "bash": {
@@ -828,7 +874,9 @@
     "looks_like": "t_fencegate_c",
     "move_cost": 0,
     "coverage": 60,
-    "flags": [ "TRANSPARENT", "FLAMMABLE_ASH", "DOOR", "BURROWABLE" ],
+    "rotates_to": "INDOORFLOOR",
+    "flags": [ "TRANSPARENT", "FLAMMABLE_ASH", "DOOR", "BURROWABLE", "PERMEABLE" ],
+    "connect_groups": "WOODFENCE",
     "connects_to": "WOODFENCE",
     "open": "t_splitrail_fencegate_o",
     "deconstruct": {
@@ -864,8 +912,9 @@
     "symbol": ".",
     "color": "brown",
     "looks_like": "t_fencegate_o",
-    "move_cost": 1,
-    "flags": [ "TRANSPARENT", "FLAMMABLE_ASH", "FLAT", "ROAD", "BURROWABLE" ],
+    "move_cost": 2,
+    "flags": [ "TRANSPARENT", "FLAMMABLE_ASH", "FLAT", "ROAD", "BURROWABLE", "PERMEABLE" ],
+    "connect_groups": "WOODFENCE",
     "connects_to": "WOODFENCE",
     "close": "t_splitrail_fencegate_c",
     "deconstruct": {
@@ -898,13 +947,14 @@
     "id": "t_fence_metal",
     "name": "metal fence",
     "description": "A simple metal fence.",
-    "symbol": "LINE_OXOX",
+    "symbol": "#",
     "color": "light_gray",
     "looks_like": "t_metal_railing",
     "move_cost": 0,
     "coverage": 60,
     "examine_action": "chainfence",
     "flags": [ "TRANSPARENT", "NOITEM", "THIN_OBSTACLE", "PERMEABLE", "CLIMBABLE", "AUTO_WALL_SYMBOL", "BURROWABLE" ],
+    "connect_groups": "WOODFENCE",
     "connects_to": "WOODFENCE",
     "deconstruct": {
       "ter_set": "t_floor",
@@ -938,7 +988,9 @@
     "looks_like": "t_fencegate_c",
     "move_cost": 0,
     "coverage": 60,
-    "flags": [ "TRANSPARENT", "DOOR", "BURROWABLE" ],
+    "rotates_to": "INDOORFLOOR",
+    "flags": [ "TRANSPARENT", "DOOR", "BURROWABLE", "PERMEABLE" ],
+    "connect_groups": "WOODFENCE",
     "connects_to": "WOODFENCE",
     "open": "t_gate_metal_o",
     "deconstruct": {
@@ -975,9 +1027,10 @@
     "symbol": ",",
     "color": "light_gray",
     "looks_like": "t_fencegate_o",
-    "move_cost": 1,
+    "move_cost": 2,
     "coverage": 60,
-    "flags": [ "TRANSPARENT", "BURROWABLE", "FLAT", "ROAD" ],
+    "flags": [ "TRANSPARENT", "BURROWABLE", "FLAT", "ROAD", "PERMEABLE" ],
+    "connect_groups": "WOODFENCE",
     "connects_to": "WOODFENCE",
     "close": "t_gate_metal_c",
     "deconstruct": {
@@ -1009,15 +1062,15 @@
   {
     "type": "terrain",
     "id": "t_privacy_fence",
-    "alias": [ "t_privacy_fence_h", "t_privacy_fence_v" ],
     "name": "wooden privacy fence",
-    "description": "A rather stout fence made of 2x4s and fence posts, it is tall and prevents people from seeing into your yard.",
-    "symbol": "LINE_OXOX",
+    "description": "A rather stout fence made of planks and fence posts, it is tall enough to prevent people from seeing into your yard.",
+    "symbol": "#",
     "color": "brown",
     "looks_like": "t_fence",
     "move_cost": 0,
     "examine_action": "chainfence",
     "flags": [ "NOITEM", "CLIMBABLE", "PERMEABLE", "AUTO_WALL_SYMBOL", "FLAMMABLE_ASH", "THIN_OBSTACLE", "BURROWABLE" ],
+    "connect_groups": "WOODFENCE",
     "connects_to": "WOODFENCE",
     "deconstruct": { "ter_set": "t_fence_post", "items": [ { "item": "2x4", "count": 8 }, { "item": "nail", "charges": 20 } ] },
     "bash": {
@@ -1033,13 +1086,15 @@
     "type": "terrain",
     "id": "t_privacy_fencegate_c",
     "name": "closed wooden privacy gate",
-    "description": "A commercial quality gate made of wood with a latch system.",
+    "description": "A commercial quality gate made of wood with a latch system.  It is tall enough to prevent people from seeing into your yard.",
     "symbol": "+",
     "color": "brown",
     "looks_like": "t_fencegate_c",
     "move_cost": 0,
     "coverage": 60,
-    "flags": [ "FLAMMABLE_ASH", "DOOR", "BURROWABLE" ],
+    "rotates_to": "INDOORFLOOR",
+    "flags": [ "FLAMMABLE_ASH", "DOOR", "BURROWABLE", "PERMEABLE" ],
+    "connect_groups": "WOODFENCE",
     "connects_to": "WOODFENCE",
     "open": "t_privacy_fencegate_o",
     "deconstruct": {
@@ -1075,8 +1130,9 @@
     "symbol": ".",
     "color": "brown",
     "looks_like": "t_fencegate_o",
-    "move_cost": 1,
-    "flags": [ "FLAMMABLE_ASH", "FLAT", "ROAD", "BURROWABLE", "TRANSPARENT" ],
+    "move_cost": 2,
+    "flags": [ "FLAMMABLE_ASH", "FLAT", "ROAD", "BURROWABLE", "TRANSPARENT", "PERMEABLE" ],
+    "connect_groups": "WOODFENCE",
     "connects_to": "WOODFENCE",
     "close": "t_privacy_fencegate_c",
     "deconstruct": {
@@ -1107,13 +1163,23 @@
   {
     "type": "terrain",
     "id": "t_railing",
-    "alias": [ "t_railing_h", "t_railing_v" ],
     "name": "railing",
     "description": "A section of wooden railing.",
-    "symbol": "LINE_OXOX",
+    "symbol": "#",
     "color": "yellow",
     "move_cost": 3,
-    "flags": [ "TRANSPARENT", "NOITEM", "THIN_OBSTACLE", "MOUNTABLE", "SHORT", "AUTO_WALL_SYMBOL", "BURROWABLE" ],
+    "flags": [
+      "FLAMMABLE_ASH",
+      "TRANSPARENT",
+      "NOITEM",
+      "THIN_OBSTACLE",
+      "MOUNTABLE",
+      "SHORT",
+      "AUTO_WALL_SYMBOL",
+      "BURROWABLE",
+      "PERMEABLE"
+    ],
+    "connect_groups": "RAILING",
     "connects_to": "RAILING",
     "bash": {
       "str_min": 20,
@@ -1132,13 +1198,13 @@
   {
     "type": "terrain",
     "id": "t_glass_railing",
-    "alias": [ "t_glass_railing_h", "t_glass_railing_v" ],
     "name": "glass railing",
     "description": "A section of railing made out of glass.",
-    "symbol": "LINE_OXOX",
+    "symbol": "#",
     "color": "cyan",
     "move_cost": 3,
-    "flags": [ "TRANSPARENT", "NOITEM", "THIN_OBSTACLE", "MOUNTABLE", "SHORT", "AUTO_WALL_SYMBOL", "BURROWABLE" ],
+    "flags": [ "TRANSPARENT", "NOITEM", "THIN_OBSTACLE", "MOUNTABLE", "SHORT", "AUTO_WALL_SYMBOL", "BURROWABLE", "PERMEABLE" ],
+    "connect_groups": "RAILING",
     "connects_to": "RAILING",
     "deconstruct": { "ter_set": "t_rock_floor", "items": [ { "item": "glass_sheet", "count": 2 }, { "item": "pipe", "count": 4 } ] },
     "bash": {
@@ -1149,7 +1215,7 @@
       "ter_set": "t_rock_floor",
       "items": [
         { "item": "glass_shard", "count": [ 50, 164 ] },
-        { "item": "pipe", "charges": [ 1, 2 ] },
+        { "item": "pipe", "count": [ 1, 2 ] },
         { "item": "scrap", "count": [ 1, 3 ] }
       ]
     }
@@ -1157,13 +1223,13 @@
   {
     "type": "terrain",
     "id": "t_metal_railing",
-    "alias": [ "t_metal__railing_h", "t_metal__railing_v" ],
     "name": "metal railing",
     "description": "A section of metal railing.",
-    "symbol": "LINE_OXOX",
+    "symbol": "#",
     "color": "dark_gray",
     "move_cost": 3,
-    "flags": [ "TRANSPARENT", "NOITEM", "THIN_OBSTACLE", "MOUNTABLE", "SHORT", "AUTO_WALL_SYMBOL", "BURROWABLE" ],
+    "flags": [ "TRANSPARENT", "NOITEM", "THIN_OBSTACLE", "MOUNTABLE", "SHORT", "AUTO_WALL_SYMBOL", "BURROWABLE", "PERMEABLE" ],
+    "connect_groups": "RAILING",
     "connects_to": "RAILING",
     "deconstruct": { "ter_set": "t_rock_floor", "items": [ { "item": "sheet_metal", "count": 2 }, { "item": "pipe", "count": 4 } ] },
     "bash": {
@@ -1182,14 +1248,24 @@
   {
     "type": "terrain",
     "id": "t_concrete_railing",
-    "alias": [ "t_concrete_railing_h", "t_concrete_railing_v" ],
     "name": "concrete railing",
     "description": "A section of cemented concrete railing.",
-    "symbol": "LINE_OXOX",
+    "symbol": "#",
     "color": "cyan",
     "looks_like": "t_ponywall",
     "move_cost": 3,
-    "flags": [ "TRANSPARENT", "NOITEM", "THIN_OBSTACLE", "MOUNTABLE", "SHORT", "AUTO_WALL_SYMBOL", "MINEABLE", "BURROWABLE" ],
+    "flags": [
+      "TRANSPARENT",
+      "NOITEM",
+      "THIN_OBSTACLE",
+      "MOUNTABLE",
+      "SHORT",
+      "AUTO_WALL_SYMBOL",
+      "MINEABLE",
+      "BURROWABLE",
+      "PERMEABLE"
+    ],
+    "connect_groups": "RAILING",
     "connects_to": "RAILING",
     "bash": {
       "str_min": 100,
@@ -1213,7 +1289,7 @@
     "color": "light_gray",
     "looks_like": "t_guardrail_bg_dp",
     "move_cost": 3,
-    "flags": [ "TRANSPARENT", "NOITEM", "REDUCE_SCENT", "MOUNTABLE", "SHORT", "THIN_OBSTACLE", "ROAD", "BURROWABLE" ],
+    "flags": [ "TRANSPARENT", "NOITEM", "REDUCE_SCENT", "MOUNTABLE", "SHORT", "THIN_OBSTACLE", "ROAD", "BURROWABLE", "PERMEABLE" ],
     "bash": {
       "str_min": 8,
       "str_max": 150,
@@ -1231,7 +1307,7 @@
     "symbol": "#",
     "color": "light_gray",
     "move_cost": 3,
-    "flags": [ "TRANSPARENT", "NOITEM", "REDUCE_SCENT", "MOUNTABLE", "SHORT", "THIN_OBSTACLE", "ROAD", "BURROWABLE" ],
+    "flags": [ "TRANSPARENT", "NOITEM", "REDUCE_SCENT", "MOUNTABLE", "SHORT", "THIN_OBSTACLE", "ROAD", "BURROWABLE", "PERMEABLE" ],
     "bash": {
       "str_min": 8,
       "str_max": 150,
@@ -1249,7 +1325,7 @@
     "symbol": "#",
     "color": "light_gray",
     "move_cost": 3,
-    "flags": [ "TRANSPARENT", "NOITEM", "REDUCE_SCENT", "MOUNTABLE", "SHORT", "THIN_OBSTACLE", "ROAD", "BURROWABLE" ],
+    "flags": [ "TRANSPARENT", "NOITEM", "REDUCE_SCENT", "MOUNTABLE", "SHORT", "THIN_OBSTACLE", "ROAD", "BURROWABLE", "PERMEABLE" ],
     "looks_like": "t_guardrail_bg_dp",
     "bash": {
       "str_min": 8,
@@ -1258,6 +1334,56 @@
       "sound_fail": "clang!",
       "ter_set": "t_pavement",
       "items": [ { "item": "pipe", "count": [ 1, 2 ] }, { "item": "scrap", "count": [ 3, 6 ] } ]
+    }
+  },
+  {
+    "type": "terrain",
+    "id": "t_boom_barrier_lowered",
+    "name": "lowered boom barrier",
+    "description": "A lowered boom barrier.",
+    "symbol": "-",
+    "color": "light_red",
+    "looks_like": "t_guardrail",
+    "move_cost": 0,
+    "coverage": 55,
+    "examine_action": "chainfence",
+    "flags": [ "TRANSPARENT", "FLAMMABLE", "NOITEM", "THIN_OBSTACLE", "PERMEABLE", "CLIMBABLE" ],
+    "connect_groups": "RAILING",
+    "connects_to": "RAILING",
+    "bash": {
+      "ter_set": "t_pavement",
+      "str_min": 3,
+      "str_max": 40,
+      "sound": "smash!",
+      "sound_fail": "whump.",
+      "items": [ { "item": "2x4", "count": [ 2, 6 ] }, { "item": "nail", "charges": [ 4, 8 ] }, { "item": "splinter", "count": 1 } ]
+    }
+  },
+  {
+    "type": "terrain",
+    "id": "t_cattle_feeder",
+    "name": "cattle feeder",
+    "description": "A section of tall steel with a solid base and feed spaces above to allow livestock to reach the contained food.",
+    "symbol": "#",
+    "color": "dark_gray",
+    "looks_like": "t_metal_railing",
+    "move_cost": 0,
+    "examine_action": "chainfence",
+    "flags": [ "TRANSPARENT", "THIN_OBSTACLE", "MOUNTABLE", "CLIMBABLE", "AUTO_WALL_SYMBOL", "BURROWABLE", "PERMEABLE" ],
+    "connect_groups": "RAILING",
+    "connects_to": "RAILING",
+    "deconstruct": { "ter_set": "t_dirt", "items": [ { "item": "sheet_metal", "count": 4 }, { "item": "pipe", "count": 2 } ] },
+    "bash": {
+      "str_min": 20,
+      "str_max": 80,
+      "sound": "clang!",
+      "sound_fail": "whump.",
+      "ter_set": "t_dirt",
+      "items": [
+        { "item": "pipe", "count": [ 0, 1 ] },
+        { "item": "sheet_metal_small", "charges": [ 1, 8 ] },
+        { "item": "scrap", "count": [ 1, 5 ] }
+      ]
     }
   }
 ]

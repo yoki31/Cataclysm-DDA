@@ -1,19 +1,22 @@
 #include "anatomy.h"
 
-#include <array>
+#include <algorithm>
 #include <cmath>
-#include <cstddef>
-#include <numeric>
+#include <map>
 #include <set>
 #include <string>
 #include <unordered_set>
 
-#include "cata_utility.h"
+#include "ballistics.h"
 #include "character.h"
+#include "creature.h"
 #include "debug.h"
-#include "generic_factory.h"
 #include "flag.h"
-#include "json.h"
+#include "flexbuffer_json-inl.h"
+#include "flexbuffer_json.h"
+#include "generic_factory.h"
+#include "init.h"
+#include "json_error.h"
 #include "messages.h"
 #include "output.h"
 #include "rng.h"
@@ -23,6 +26,7 @@
 static const anatomy_id anatomy_human_anatomy( "human_anatomy" );
 
 static const json_character_flag json_flag_ALWAYS_BLOCK( "ALWAYS_BLOCK" );
+static const json_character_flag json_flag_BIONIC_LIMB( "BIONIC_LIMB" );
 static const json_character_flag json_flag_LIMB_LOWER( "LIMB_LOWER" );
 static const json_character_flag json_flag_LIMB_UPPER( "LIMB_UPPER" );
 static const json_character_flag json_flag_NONSTANDARD_BLOCK( "NONSTANDARD_BLOCK" );
@@ -53,7 +57,7 @@ void anatomy::load_anatomy( const JsonObject &jo, const std::string &src )
     anatomy_factory.load( jo, src );
 }
 
-void anatomy::load( const JsonObject &jo, const std::string & )
+void anatomy::load( const JsonObject &jo, const std::string_view )
 {
     mandatory( jo, was_loaded, "id", id );
     mandatory( jo, was_loaded, "parts", unloaded_bps );
@@ -154,6 +158,19 @@ float anatomy::get_hit_size_sum() const
     return ret;
 }
 
+float anatomy::get_organic_size_sum() const
+{
+    float ret = 0.0f;
+    for( const bodypart_id &bp : cached_bps ) {
+        if( !bp->has_flag( json_flag_BIONIC_LIMB ) ) {
+            ret += bp->hit_size;
+        }
+    }
+    add_msg_debug( debugmode::DF_ANATOMY_BP, "Current organic hitsize sum %.1f",
+                   ret );
+    return ret;
+}
+
 float anatomy::get_base_hit_size_sum( const anatomy_id &base ) const
 {
     add_msg_debug( debugmode::DF_ANATOMY_BP, "Base anatomy hitsize sum %.1f",
@@ -244,7 +261,6 @@ bodypart_id anatomy::select_body_part( int min_hit, int max_hit, bool can_attack
     return *ret;
 }
 
-
 bodypart_id anatomy::select_blocking_part( const Creature *blocker, bool arm, bool leg,
         bool nonstandard ) const
 {
@@ -309,4 +325,50 @@ bodypart_id anatomy::select_blocking_part( const Creature *blocker, bool arm, bo
 
     add_msg_debug( debugmode::DF_MELEE, "selected part: %s", ret->id().obj().name );
     return *ret;
+}
+
+std::vector<bodypart_id> anatomy::get_all_eligable_parts( int min_hit, int max_hit,
+        bool can_attack_high ) const
+{
+    std::vector<bodypart_id> ret;
+    for( const bodypart_id &bp : cached_bps ) {
+        if( ( bp->hit_size > max_hit && max_hit > 0 ) || bp->hit_size < min_hit || ( !can_attack_high &&
+                bp->has_flag( json_flag_LIMB_UPPER ) ) ) {
+            continue;
+        }
+        ret.emplace_back( bp );
+    }
+    return ret;
+}
+
+bodypart_id anatomy::get_max_hitsize_bodypart() const
+{
+    return *std::max_element( cached_bps.begin(), cached_bps.end(),
+    []( const bodypart_id & lhs, const bodypart_id & rhs ) {
+        return lhs->hit_size < rhs->hit_size;
+    } );
+}
+
+bodypart_id anatomy::select_body_part_projectile_attack( const double range_min,
+        const double range_max, const double value ) const
+{
+    const bodypart_id biggest_bp = get_max_hitsize_bodypart();
+
+    // A little wrapper telling the targeting graph how to connect and weight bodypart_ids
+    struct bp_wrapper {
+        static bodypart_id connection( const bodypart_id &id ) {
+            return id->connected_to.id();
+        }
+        static double weight( const bodypart_id &id ) {
+            return id->hit_size;
+        }
+    };
+
+    // Create a graph
+    targeting_graph<bodypart_id, bp_wrapper> graph;
+    // Fill it in with our body parts
+    graph.generate( biggest_bp, cached_bps );
+
+    // And now, select the right body part
+    return graph.select( range_min, range_max, value );
 }

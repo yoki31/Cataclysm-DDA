@@ -25,6 +25,9 @@ from pathlib import Path
 from typing import Any, Optional, Tuple, Union
 
 try:
+    vips_path = os.getenv("LIBVIPS_PATH")
+    if vips_path is not None and vips_path != "":
+        os.environ["PATH"] += ";" + os.path.join(vips_path, "bin")
     import pyvips
     Vips = pyvips
 except ImportError:
@@ -38,6 +41,9 @@ run_silent = True
 
 # variable for progress bar support (tqdm module dependency)
 no_tqdm = False
+
+# File name to ignore containing directory
+ignore_file = ".scratch"
 
 
 # progress bar setup
@@ -250,10 +256,14 @@ class Tileset:
                 f'Error: cannot open directory {self.source_dir}')
 
         self.processed_ids = []
-        info_path = self.source_dir / 'tile_info.json'
+        info_path = self.source_dir.joinpath('tile_info.json')
         self.sprite_width = 16
         self.sprite_height = 16
+        self.zlevel_height = 0
         self.pixelscale = 1
+        self.iso = False
+        self.retract_dist_min = -1.0
+        self.retract_dist_max = 1.0
         self.info = [{}]
 
         if not os.access(info_path, os.R_OK):
@@ -263,7 +273,14 @@ class Tileset:
             self.info = json.load(file)
             self.sprite_width = self.info[0].get('width', self.sprite_width)
             self.sprite_height = self.info[0].get('height', self.sprite_height)
+            self.zlevel_height = self.info[0].get('zlevel_height',
+                                                  self.zlevel_height)
             self.pixelscale = self.info[0].get('pixelscale', self.pixelscale)
+            self.retract_dist_min = self.info[0].get('retract_dist_min',
+                                                     self.retract_dist_min)
+            self.retract_dist_max = self.info[0].get('retract_dist_max',
+                                                     self.retract_dist_max)
+            self.iso = self.info[0].get('iso', self.iso)
 
     def determine_conffile(self) -> str:
         '''
@@ -272,7 +289,7 @@ class Tileset:
         properties = {}
 
         for candidate_path in (self.source_dir, self.output_dir):
-            properties_path = candidate_path / PROPERTIES_FILENAME
+            properties_path = candidate_path.joinpath(PROPERTIES_FILENAME)
             if os.access(properties_path, os.R_OK):
                 properties = read_properties(properties_path)
                 if properties:
@@ -295,7 +312,7 @@ class Tileset:
         Convert a composing tileset into a package readable by the game
         '''
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        tileset_confpath = self.output_dir / self.determine_conffile()
+        tileset_confpath = self.output_dir.joinpath(self.determine_conffile())
         typed_sheets = {
             'main': [],
             'filler': [],
@@ -385,6 +402,19 @@ class Tileset:
         for sheet in sheet_configs:
             if sheet.is_fallback:
                 fallback_name = sheet.name
+                if not sheet.is_standard():
+                    FALLBACK['sprite_width'] = sheet.sprite_width
+                    FALLBACK['sprite_height'] = sheet.sprite_height
+                    FALLBACK['sprite_offset_x'] = sheet.offset_x
+                    FALLBACK['sprite_offset_y'] = sheet.offset_y
+                    if sheet.offset_x_retracted != sheet.offset_x \
+                            or sheet.offset_y_retracted != sheet.offset_y:
+                        FALLBACK['sprite_offset_x_retracted'] = \
+                            sheet.offset_x_retracted
+                        FALLBACK['sprite_offset_y_retracted'] = \
+                            sheet.offset_y_retracted
+                    if sheet.pixelscale != 1.0:
+                        FALLBACK['pixelscale'] = sheet.pixelscale
                 continue
             if sheet.is_filler and not main_finished:
                 create_tile_entries_for_unused(
@@ -410,6 +440,14 @@ class Tileset:
                 sheet_conf['sprite_height'] = sheet.sprite_height
                 sheet_conf['sprite_offset_x'] = sheet.offset_x
                 sheet_conf['sprite_offset_y'] = sheet.offset_y
+                if sheet.offset_x_retracted != sheet.offset_x \
+                        or sheet.offset_y_retracted != sheet.offset_y:
+                    sheet_conf['sprite_offset_x_retracted'] = \
+                        sheet.offset_x_retracted
+                    sheet_conf['sprite_offset_y_retracted'] = \
+                        sheet.offset_y_retracted
+                if sheet.pixelscale != 1.0:
+                    sheet_conf['pixelscale'] = sheet.pixelscale
 
             sheet_conf['tiles'] = sheet_entries
 
@@ -436,6 +474,10 @@ class Tileset:
                 'pixelscale': self.pixelscale,
                 'width': self.sprite_width,
                 'height': self.sprite_height,
+                'zlevel_height': self.zlevel_height,
+                'iso': self.iso,
+                'retract_dist_min': self.retract_dist_min,
+                'retract_dist_max': self.retract_dist_max
             }],
             'tiles-new': tiles_new
         }
@@ -489,6 +531,12 @@ class Tilesheet:
             'sprite_height', tileset.sprite_height)
         self.offset_x = specs.get('sprite_offset_x', 0)
         self.offset_y = specs.get('sprite_offset_y', 0)
+        self.offset_x_retracted = \
+            specs.get('sprite_offset_x_retracted', self.offset_x)
+        self.offset_y_retracted = \
+            specs.get('sprite_offset_y_retracted', self.offset_y)
+
+        self.pixelscale = specs.get('pixelscale', 1.0)
 
         self.sprites_across = specs.get('sprites_across', 16)
         self.exclude = specs.get('exclude', tuple())
@@ -500,9 +548,9 @@ class Tilesheet:
         output_root = self.name.split('.png')[0]
         dir_name = \
             f'pngs_{output_root}_{self.sprite_width}x{self.sprite_height}'
-        self.subdir_path = tileset.source_dir / dir_name
+        self.subdir_path = tileset.source_dir.joinpath(dir_name)
 
-        self.output = tileset.output_dir / self.name
+        self.output = tileset.output_dir.joinpath(self.name)
 
         self.tile_entries = []
         self.null_image = \
@@ -518,9 +566,14 @@ class Tilesheet:
         '''
         if self.offset_x or self.offset_y:
             return False
+        if self.offset_x_retracted != self.offset_x \
+                or self.offset_y_retracted != self.offset_y:
+            return False
         if self.sprite_width != self.tileset.sprite_width:
             return False
         if self.sprite_height != self.tileset.sprite_height:
+            return False
+        if self.pixelscale != 1.0:
             return False
         return True
 
@@ -528,22 +581,28 @@ class Tilesheet:
         '''
         Find and process all JSON and PNG files within sheet directory
         '''
-        all_files = sorted(os.walk(self.subdir_path), key=lambda d: d[0])
-        excluded_paths = [  # TODO: dict by parent dirs
-            self.subdir_path / ignored_path for ignored_path in self.exclude
-        ]
-        mode = all_files if no_tqdm or run_silent else tqdm(all_files)
-        for subdir_fpath, dirs, filenames in mode:
-            subdir_fpath = Path(subdir_fpath)
-            if excluded_paths:
+
+        def filtered_tree(excluded):
+            for root, dirs, filenames in \
+                    os.walk(self.subdir_path, followlinks=True):
                 # replace dirs in-place to prevent walking down excluded paths
                 dirs[:] = [
-                    d for d in dirs
-                    if subdir_fpath / d not in excluded_paths
+                    d
+                    for d in dirs
+                    if Path(root).joinpath(d) not in excluded and
+                    not Path(root).joinpath(d, ignore_file).is_file()
                 ]
+                yield [root, dirs, filenames]
 
+        sorted_files = sorted(
+            filtered_tree(list(map(self.subdir_path.joinpath, self.exclude))),
+            key=lambda d: d[0]
+        )
+        mode = sorted_files if no_tqdm or run_silent else tqdm(sorted_files)
+        for subdir_fpath, dirs, filenames in mode:
+            subdir_fpath = Path(subdir_fpath)
             for filename in sorted(filenames):
-                filepath = subdir_fpath / filename
+                filepath = subdir_fpath.joinpath(filename)
 
                 if filepath.suffixes == ['.png']:
                     self.process_png(filepath)

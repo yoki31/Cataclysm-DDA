@@ -1,4 +1,6 @@
-# Adding stuff
+# Developer FAQ
+
+## Adding stuff
 
 ## Adding a monster
 
@@ -58,7 +60,7 @@ The comments given in source code to structure `struct overmap_special` explain 
 5. If the armor doesn't cover the chosen sub body part skip it.
 6. Depending on the attack the armors melee, ranged or general coverage (which is not scaled to the overall body part and instead just how much of the sublimb it covers) is compared to the roll from above.
 7. In the future Vitals Coverage will be used to scale incoming critical damage, reducing crit multipliers but it is not implemented yet.
-8. If the above roll fails (ie roll value is above coverage), then the armor does not absorb any damage from the blow, neither does it become damaged.
+8. If the above roll fails (i.e. roll value is above coverage), then the armor does not absorb any damage from the blow, neither does it become damaged.
 9. If the above roll succeeds, the armor is hit, possibly absorbing some damage and possibly getting damaged in the process.
 10. If the armor has ABLATIVE pockets (like ballistic vests) at this point the coverage of those plates is rolled to see if they possibly absorb some damage and possibly get damaged in the process. At most one ablative pocket on an item can apply to an attack and the coverage of the plates is scaled based on the coverage of the armor they are in. This is because if a plate covers 45% of the torso but the clothing its in only covers 50% of the torso, you already know the attack hit the jacket and the jacket is 90% (45/50) plate.
 11. Armor protects against damage.  The values are determined by multiplying the armor thickness by the materials individual damage type resistance factor respectively, given in `materials.json`.
@@ -70,8 +72,9 @@ Specifically to ablative plates, some transform when damaged instead of damaging
 ## Adding an iuse function.
 
 1. Add the new item use code to `iuse.cpp` and `iuse.h`.
-2. Add the new json_flag to your item. And link it to the iuse function in `item_factory.cpp`.
-3. Document the new flag in `JSON_FLAGS.md`.
+2. Add a new json_flag to `flags.json`, and add the flag to your item(s) and to an `item_actions.json` entry. 
+3. Link the flag to the iuse function in `item_factory.cpp`.
+4. Document the new flag in `JSON_FLAGS.md`.
 
 ## Acid resistance
 

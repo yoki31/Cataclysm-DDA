@@ -1,17 +1,19 @@
 #include <clang/Basic/Version.h>
+#include <clang-tidy/ClangTidyModule.h>
+#include <clang-tidy/ClangTidyModuleRegistry.h>
 #include <llvm/ADT/StringRef.h>
 
 #include "AlmostNeverAutoCheck.h"
 #include "AssertCheck.h"
-#include "ClangTidyModule.h"
-#include "ClangTidyModuleRegistry.h"
+#include "AvoidAlternativeTokensCheck.h"
 #include "CombineLocalsIntoPointCheck.h"
 #include "DeterminismCheck.h"
 #include "HeaderGuardCheck.h"
 #include "JsonTranslationInputCheck.h"
+#include "LargeInlineFunctionCheck.h"
 #include "LargeStackObjectCheck.h"
 #include "NoLongCheck.h"
-#include "NoStaticGettextCheck.h"
+#include "NoStaticTranslationCheck.h"
 #include "OtMatchCheck.h"
 #include "PointInitializationCheck.h"
 #include "RedundantParenthesesCheck.h"
@@ -27,18 +29,24 @@
 #include "TranslateStringLiteralCheck.h"
 #include "TranslationsInDebugMessagesCheck.h"
 #include "TranslatorCommentsCheck.h"
+#include "U8PathCheck.h"
+#include "UnitOverflowCheck.h"
 #include "UnsequencedCallsCheck.h"
 #include "UnusedStaticsCheck.h"
 #include "UseLocalizedSortingCheck.h"
+#include "UseMdarrayCheck.h"
 #include "UseNamedPointConstantsCheck.h"
 #include "UsePointApisCheck.h"
 #include "UsePointArithmeticCheck.h"
+#include "UseStringViewCheck.h"
 #include "UTF8ToLowerUpperCheck.h"
 #include "XYCheck.h"
 
-namespace clang
-{
-namespace tidy
+#if defined( CATA_CLANG_TIDY_EXECUTABLE )
+#include <clang-tidy/tool/ClangTidyMain.h>
+#endif
+
+namespace clang::tidy
 {
 namespace cata
 {
@@ -59,14 +67,17 @@ class CataModule : public ClangTidyModule
             }
             CheckFactories.registerCheck<AlmostNeverAutoCheck>( "cata-almost-never-auto" );
             CheckFactories.registerCheck<AssertCheck>( "cata-assert" );
+            CheckFactories.registerCheck<AvoidAlternativeTokensCheck>(
+                "cata-avoid-alternative-tokens" );
             CheckFactories.registerCheck<CombineLocalsIntoPointCheck>(
                 "cata-combine-locals-into-point" );
             CheckFactories.registerCheck<DeterminismCheck>( "cata-determinism" );
             CheckFactories.registerCheck<CataHeaderGuardCheck>( "cata-header-guard" );
             CheckFactories.registerCheck<JsonTranslationInputCheck>( "cata-json-translation-input" );
+            CheckFactories.registerCheck<LargeInlineFunctionCheck>( "cata-large-inline-function" );
             CheckFactories.registerCheck<LargeStackObjectCheck>( "cata-large-stack-object" );
             CheckFactories.registerCheck<NoLongCheck>( "cata-no-long" );
-            CheckFactories.registerCheck<NoStaticGettextCheck>( "cata-no-static-gettext" );
+            CheckFactories.registerCheck<NoStaticTranslationCheck>( "cata-no-static-translation" );
             CheckFactories.registerCheck<OtMatchCheck>( "cata-ot-match" );
             CheckFactories.registerCheck<PointInitializationCheck>( "cata-point-initialization" );
             CheckFactories.registerCheck<RedundantParenthesesCheck>( "cata-redundant-parentheses" );
@@ -89,13 +100,17 @@ class CataModule : public ClangTidyModule
             CheckFactories.registerCheck<TranslationsInDebugMessagesCheck>(
                 "cata-translations-in-debug-messages" );
             CheckFactories.registerCheck<TranslatorCommentsCheck>( "cata-translator-comments" );
+            CheckFactories.registerCheck<U8PathCheck>( "cata-u8-path" );
+            CheckFactories.registerCheck<UnitOverflowCheck>( "cata-unit-overflow" );
             CheckFactories.registerCheck<UnsequencedCallsCheck>( "cata-unsequenced-calls" );
             CheckFactories.registerCheck<UnusedStaticsCheck>( "cata-unused-statics" );
             CheckFactories.registerCheck<UseLocalizedSortingCheck>( "cata-use-localized-sorting" );
+            CheckFactories.registerCheck<UseMdarrayCheck>( "cata-use-mdarray" );
             CheckFactories.registerCheck<UseNamedPointConstantsCheck>(
                 "cata-use-named-point-constants" );
             CheckFactories.registerCheck<UsePointApisCheck>( "cata-use-point-apis" );
             CheckFactories.registerCheck<UsePointArithmeticCheck>( "cata-use-point-arithmetic" );
+            CheckFactories.registerCheck<UseStringViewCheck>( "cata-use-string_view" );
             CheckFactories.registerCheck<UTF8ToLowerUpperCheck>( "cata-utf8-no-to-lower-to-upper" );
             CheckFactories.registerCheck<XYCheck>( "cata-xy" );
         }
@@ -108,5 +123,11 @@ class CataModule : public ClangTidyModule
 static ClangTidyModuleRegistry::Add<cata::CataModule>
 X( "cata-module", "Adds Cataclysm-DDA checks." );
 
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy
+
+#if defined( CATA_CLANG_TIDY_EXECUTABLE )
+int main( int argc, const char **argv )
+{
+    return clang::tidy::clangTidyMain( argc, argv );
+}
+#endif

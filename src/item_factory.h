@@ -35,7 +35,6 @@ using Item_list = std::vector<item>;
 
 class Item_factory;
 class JsonArray;
-class JsonIn;
 class JsonObject;
 
 extern std::unique_ptr<Item_factory> item_controller;
@@ -45,10 +44,13 @@ class migration
     public:
         itype_id id;
         std::string variant;
-        cata::optional<std::string> from_variant;
+        std::optional<std::string> from_variant;
         itype_id replace;
         std::set<std::string> flags;
         int charges = 0;
+
+        // if set to true then reset item_vars std::map to the value of itype's item_variables
+        bool reset_item_vars = false;
 
         class content
         {
@@ -124,6 +126,17 @@ class Item_factory
          */
         void load_item_group( const JsonObject &jsobj, const item_group_id &group_id,
                               const std::string &subtype, std::string context = {} );
+
+        /**
+        * Actually the load item group data into the group. Matches the above function, which merely
+        * organises which group to load into and the type.
+        * @param jsobj The json object to load from.
+        * @param group_id The ident of the item that is to be loaded.
+        * @param subtype The type of the item group, either "collection", "distribution" or "old"
+        * ("old" is a distribution, too).
+        */
+        void load_item_group_data( const JsonObject &jsobj, Item_group *ig,
+                                   const std::string &subtype );
         /**
          * Like above, but the above loads data from several members of the object, this function
          * assume the given array is the "entries" member of the item group.
@@ -153,16 +166,6 @@ class Item_factory
          * Returns the idents of all item groups that are known.
          */
         std::vector<item_group_id> get_all_group_names();
-        /**
-         * Sets the chance of the specified item in the group.
-         * @param group_id Group to add item to
-         * @param item_id Id of item to add to group
-         * @param chance The relative weight of the item. A value of 0 removes the item from the
-         * group.
-         * @return false if the group doesn't exist.
-         */
-        bool add_item_to_group( const item_group_id &, const itype_id &item_id, int chance );
-        /*@}*/
 
         /**
          * @name Item type loading
@@ -221,6 +224,9 @@ class Item_factory
          */
         void migrate_item( const itype_id &id, item &obj );
 
+        /** applies a migration to the item if one exists with the given from_variant */
+        void migrate_item_from_variant( item &obj, const std::string &from_variant );
+
         /**
          * Check if an item type is known to the Item_factory.
          * @param id Item type id (@ref itype::id).
@@ -234,13 +240,6 @@ class Item_factory
          * @param id Item type id (@ref itype::id).
          */
         const itype *find_template( const itype_id &id ) const;
-
-        /**
-         * Add a passed in itype to the collection of item types.
-         * If the item type overrides an existing type, the existing type is deleted first.
-         * @param def The new item type, must not be null.
-         */
-        void add_item_type( const itype &def );
 
         /**
          * Check if an iuse is known to the Item_factory.
@@ -308,7 +307,7 @@ class Item_factory
          */
         template<typename SlotType>
         void load_slot_optional( cata::value_ptr<SlotType> &slotptr, const JsonObject &jo,
-                                 const std::string &member, const std::string &src );
+                                 std::string_view member, const std::string &src );
 
         void load( islot_tool &slot, const JsonObject &jo, const std::string &src );
         void load( islot_comestible &slot, const JsonObject &jo, const std::string &src );
@@ -317,18 +316,20 @@ class Item_factory
         void load( islot_gunmod &slot, const JsonObject &jo, const std::string &src );
         void load( islot_magazine &slot, const JsonObject &jo, const std::string &src );
         void load( islot_bionic &slot, const JsonObject &jo, const std::string &src );
-        void load( relic &slot, const JsonObject &jo, const std::string &src );
+        void load( relic &slot, const JsonObject &jo, std::string_view src );
 
         //json data handlers
         void emplace_usage( std::map<std::string, use_function> &container,
                             const std::string &iuse_id );
 
-        void set_use_methods_from_json( const JsonObject &jo, const std::string &member,
-                                        std::map<std::string, use_function> &use_methods, std::map<std::string, float> &ammo_scale );
+        void set_use_methods_from_json( const JsonObject &jo, const std::string &src,
+                                        const std::string &member, std::map<std::string, use_function> &use_methods,
+                                        std::map<std::string, int> &ammo_scale );
 
         use_function usage_from_string( const std::string &type ) const;
 
-        std::pair<std::string, use_function> usage_from_object( const JsonObject &obj );
+        std::pair<std::string, use_function> usage_from_object( const JsonObject &obj,
+                const std::string & );
 
         /**
          * Helper function for Item_group loading
@@ -345,14 +346,17 @@ class Item_factory
          */
         bool load_sub_ref( std::unique_ptr<Item_spawn_data> &ptr, const JsonObject &obj,
                            const std::string &name, const Item_group &parent );
-        bool load_string( std::vector<std::string> &vec, const JsonObject &obj, const std::string &name );
+        bool load_string( std::vector<std::string> &vec, const JsonObject &obj, std::string_view name );
         void add_entry( Item_group &ig, const JsonObject &obj, const std::string &context );
 
         void load_basic_info( const JsonObject &jo, itype &def, const std::string &src );
         void set_qualities_from_json( const JsonObject &jo, const std::string &member, itype &def );
-        void extend_qualities_from_json( const JsonObject &jo, const std::string &member, itype &def );
-        void delete_qualities_from_json( const JsonObject &jo, const std::string &member, itype &def );
-        void set_properties_from_json( const JsonObject &jo, const std::string &member, itype &def );
+        void extend_qualities_from_json( const JsonObject &jo, std::string_view member, itype &def );
+        void delete_qualities_from_json( const JsonObject &jo, std::string_view member, itype &def );
+        void relative_qualities_from_json( const JsonObject &jo, std::string_view member, itype &def );
+        void set_techniques_from_json( const JsonObject &jo, const std::string_view &member, itype &def );
+        void extend_techniques_from_json( const JsonObject &jo, std::string_view member, itype &def );
+        void delete_techniques_from_json( const JsonObject &jo, std::string_view member, itype &def );
 
         // declared here to have friendship status with itype
         static void npc_implied_flags( itype &item_template );
@@ -369,6 +373,8 @@ class Item_factory
         void register_cached_uses( const itype &obj );
         /** Applies part of finalization that depends on other items. */
         void finalize_post( itype &obj );
+
+        void finalize_post_armor( itype &obj );
 
         //iuse stuff
         std::map<item_action_id, use_function> iuse_function_list;

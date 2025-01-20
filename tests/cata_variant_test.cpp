@@ -8,6 +8,7 @@
 #include "debug_menu.h"
 #include "enum_conversions.h"
 #include "json.h"
+#include "json_loader.h"
 #include "point.h"
 #include "type_id.h"
 
@@ -18,7 +19,7 @@ static const mtype_id This_is_not_a_valid_id( "This is not a valid id" );
 static const mtype_id mon_zombie( "mon_zombie" );
 static const mtype_id zombie( "zombie" );
 
-TEST_CASE( "variant_construction", "[variant]" )
+TEST_CASE( "variant_construction", "[variant][nogame]" )
 {
     SECTION( "itype_id" ) {
         cata_variant v = cata_variant::make<cata_variant_type::itype_id>( itype_anvil );
@@ -61,7 +62,7 @@ TEST_CASE( "variant_construction", "[variant]" )
     }
 }
 
-TEST_CASE( "variant_copy_move", "[variant]" )
+TEST_CASE( "variant_copy_move", "[variant][nogame]" )
 {
     cata_variant v = cata_variant( zombie );
     cata_variant v2 = v;
@@ -74,7 +75,7 @@ TEST_CASE( "variant_copy_move", "[variant]" )
     CHECK( v5.get<mtype_id>() == zombie );
 }
 
-TEST_CASE( "variant_type_name_round_trip", "[variant]" )
+TEST_CASE( "variant_type_name_round_trip", "[variant][nogame]" )
 {
     int num_types = static_cast<int>( cata_variant_type::num_types );
     for( int i = 0; i < num_types; ++i ) {
@@ -84,14 +85,14 @@ TEST_CASE( "variant_type_name_round_trip", "[variant]" )
     }
 }
 
-TEST_CASE( "variant_default_constructor", "[variant]" )
+TEST_CASE( "variant_default_constructor", "[variant][nogame]" )
 {
     cata_variant v;
     CHECK( v.type() == cata_variant_type::void_ );
     CHECK( v.get_string().empty() );
 }
 
-TEST_CASE( "variant_serialization", "[variant]" )
+TEST_CASE( "variant_serialization", "[variant][nogame]" )
 {
     cata_variant v = cata_variant( zombie );
     std::ostringstream os;
@@ -100,22 +101,21 @@ TEST_CASE( "variant_serialization", "[variant]" )
     CHECK( os.str() == R"(["mtype_id","zombie"])" );
 }
 
-TEST_CASE( "variant_deserialization", "[variant]" )
+TEST_CASE( "variant_deserialization", "[variant][nogame]" )
 {
-    std::istringstream is( R"(["mtype_id","zombie"])" );
-    JsonIn jsin( is );
+    JsonValue jsin = json_loader::from_string( R"(["mtype_id","zombie"])" );
     cata_variant v;
     v.deserialize( jsin );
     CHECK( v == cata_variant( zombie ) );
 }
 
-TEST_CASE( "variant_from_string" )
+TEST_CASE( "variant_from_string", "[nogame]" )
 {
     cata_variant v = cata_variant::from_string( cata_variant_type::mtype_id, "mon_zombie" );
     CHECK( v == cata_variant( mon_zombie ) );
 }
 
-TEST_CASE( "variant_type_for", "[variant]" )
+TEST_CASE( "variant_type_for", "[variant][nogame]" )
 {
     CHECK( cata_variant_type_for<bool>() == cata_variant_type::bool_ );
     CHECK( cata_variant_type_for<int>() == cata_variant_type::int_ );

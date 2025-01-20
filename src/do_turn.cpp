@@ -1,40 +1,82 @@
 #include "do_turn.h"
 
+#if defined(EMSCRIPTEN)
+#include <emscripten.h>
+#endif
+
+#include <algorithm>
+#include <chrono>
+#include <map>
+#include <memory>
+#include <optional>
+#include <ostream>
+#include <set>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #include "action.h"
+#include "activity_type.h"
 #include "avatar.h"
 #include "bionics.h"
 #include "cached_options.h"
 #include "calendar.h"
-#include "creature_tracker.h"
+#include "cata_variant.h"
+#include "clzones.h"
+#include "coordinates.h"
+#include "debug.h"
+#include "enums.h"
+#include "event.h"
 #include "event_bus.h"
 #include "explosion.h"
 #include "game.h"
+#include "game_constants.h"
 #include "gamemode.h"
 #include "help.h"
-#include "kill_tracker.h"
+#include "input.h"
+#include "input_context.h"
+#include "line.h"
 #include "make_static.h"
 #include "map.h"
+#include "map_iterator.h"
 #include "mapbuffer.h"
+#include "mapdata.h"
 #include "memorial_logger.h"
 #include "messages.h"
 #include "mission.h"
-#include "monattack.h"
+#include "monster.h"
 #include "mtype.h"
+#include "music.h"
 #include "npc.h"
 #include "options.h"
 #include "output.h"
 #include "overmapbuffer.h"
+#include "pimpl.h"
+#include "player_activity.h"
+#include "point.h"
 #include "popup.h"
+#include "rng.h"
 #include "scent_map.h"
-#include "string_input_popup.h"
+#include "sdlsound.h"
+#include "sounds.h"
+#include "stats_tracker.h"
+#include "string_formatter.h"
 #include "timed_event.h"
+#include "translations.h"
+#include "type_id.h"
+#include "ui.h"
 #include "ui_manager.h"
+#include "units.h"
 #include "vehicle.h"
 #include "vpart_position.h"
-#include "wcwidth.h"
+#include "weather.h"
+#include "weather_type.h"
 #include "worldfactory.h"
 
 static const activity_id ACT_AUTODRIVE( "ACT_AUTODRIVE" );
+static const activity_id ACT_FIRSTAID( "ACT_FIRSTAID" );
 static const activity_id ACT_OPERATION( "ACT_OPERATION" );
 
 static const bionic_id bio_alarm( "bio_alarm" );
@@ -44,13 +86,9 @@ static const efftype_id effect_npc_suspend( "npc_suspend" );
 static const efftype_id effect_ridden( "ridden" );
 static const efftype_id effect_sleep( "sleep" );
 
-static const itype_id itype_holybook_bible1( "holybook_bible1" );
-static const itype_id itype_holybook_bible2( "holybook_bible2" );
-static const itype_id itype_holybook_bible3( "holybook_bible3" );
+static const event_statistic_id event_statistic_last_words( "last_words" );
 
-static const trait_id trait_CANNIBAL( "CANNIBAL" );
 static const trait_id trait_HAS_NEMESIS( "HAS_NEMESIS" );
-static const trait_id trait_PSYCHOPATH( "PSYCHOPATH" );
 
 #if defined(__ANDROID__)
 extern std::map<std::string, std::list<input_event>> quick_shortcuts_map;
@@ -82,197 +120,20 @@ bool cleanup_at_end()
 
         // and the overmap, and the local map.
         g->save_maps(); //Omap also contains the npcs who need to be saved.
-    }
 
-    if( g->uquit == QUIT_DIED || g->uquit == QUIT_SUICIDE ) {
-        std::vector<std::string> vRip;
+        //save achievements entry
+        g->save_achievements();
 
-        int iMaxWidth = 0;
-        int iNameLine = 0;
-        int iInfoLine = 0;
-
-        if( u.has_amount( itype_holybook_bible1, 1 ) || u.has_amount( itype_holybook_bible2, 1 ) ||
-            u.has_amount( itype_holybook_bible3, 1 ) ) {
-            if( !( u.has_trait( trait_CANNIBAL ) || u.has_trait( trait_PSYCHOPATH ) ) ) {
-                vRip.emplace_back( "               _______  ___" );
-                vRip.emplace_back( "              <       `/   |" );
-                vRip.emplace_back( "               >  _     _ (" );
-                vRip.emplace_back( "              |  |_) | |_) |" );
-                vRip.emplace_back( "              |  | \\ | |   |" );
-                vRip.emplace_back( "   ______.__%_|            |_________  __" );
-                vRip.emplace_back( " _/                                  \\|  |" );
-                iNameLine = vRip.size();
-                vRip.emplace_back( "|                                        <" );
-                vRip.emplace_back( "|                                        |" );
-                iMaxWidth = utf8_width( vRip.back() );
-                vRip.emplace_back( "|                                        |" );
-                vRip.emplace_back( "|_____.-._____              __/|_________|" );
-                vRip.emplace_back( "              |            |" );
-                iInfoLine = vRip.size();
-                vRip.emplace_back( "              |            |" );
-                vRip.emplace_back( "              |           <" );
-                vRip.emplace_back( "              |            |" );
-                vRip.emplace_back( "              |   _        |" );
-                vRip.emplace_back( "              |__/         |" );
-                vRip.emplace_back( "             % / `--.      |%" );
-                vRip.emplace_back( "         * .%%|          -< @%%%" ); // NOLINT(cata-text-style)
-                vRip.emplace_back( "         `\\%`@|            |@@%@%%" );
-                vRip.emplace_back( "       .%%%@@@|%     `   % @@@%%@%%%%" );
-                vRip.emplace_back( "  _.%%%%%%@@@@@@%%%__/\\%@@%%@@@@@@@%%%%%%" );
-
-            } else {
-                vRip.emplace_back( "               _______  ___" );
-                vRip.emplace_back( "              |       \\/   |" );
-                vRip.emplace_back( "              |            |" );
-                vRip.emplace_back( "              |            |" );
-                iInfoLine = vRip.size();
-                vRip.emplace_back( "              |            |" );
-                vRip.emplace_back( "              |            |" );
-                vRip.emplace_back( "              |            |" );
-                vRip.emplace_back( "              |            |" );
-                vRip.emplace_back( "              |           <" );
-                vRip.emplace_back( "              |   _        |" );
-                vRip.emplace_back( "              |__/         |" );
-                vRip.emplace_back( "   ______.__%_|            |__________  _" );
-                vRip.emplace_back( " _/                                   \\| \\" );
-                iNameLine = vRip.size();
-                vRip.emplace_back( "|                                         <" );
-                vRip.emplace_back( "|                                         |" );
-                iMaxWidth = utf8_width( vRip.back() );
-                vRip.emplace_back( "|                                         |" );
-                vRip.emplace_back( "|_____.-._______            __/|__________|" );
-                vRip.emplace_back( "             % / `_-.   _  |%" );
-                vRip.emplace_back( "         * .%%|  |_) | |_)< @%%%" ); // NOLINT(cata-text-style)
-                vRip.emplace_back( "         `\\%`@|  | \\ | |   |@@%@%%" );
-                vRip.emplace_back( "       .%%%@@@|%     `   % @@@%%@%%%%" );
-                vRip.emplace_back( "  _.%%%%%%@@@@@@%%%__/\\%@@%%@@@@@@@%%%%%%" );
-            }
-        } else {
-            vRip.emplace_back( R"(           _________  ____           )" );
-            vRip.emplace_back( R"(         _/         `/    \_         )" );
-            vRip.emplace_back( R"(       _/      _     _      \_.      )" );
-            vRip.emplace_back( R"(     _%\      |_) | |_)       \_     )" );
-            vRip.emplace_back( R"(   _/ \/      | \ | |           \_   )" );
-            vRip.emplace_back( R"( _/                               \_ )" );
-            vRip.emplace_back( R"(|                                   |)" );
-            iNameLine = vRip.size();
-            vRip.emplace_back( R"( )                                 < )" );
-            vRip.emplace_back( R"(|                                   |)" );
-            vRip.emplace_back( R"(|                                   |)" );
-            vRip.emplace_back( R"(|   _                               |)" );
-            vRip.emplace_back( R"(|__/                                |)" );
-            iMaxWidth = utf8_width( vRip.back() );
-            vRip.emplace_back( R"( / `--.                             |)" );
-            vRip.emplace_back( R"(|                                  ( )" );
-            iInfoLine = vRip.size();
-            vRip.emplace_back( R"(|                                   |)" );
-            vRip.emplace_back( R"(|                                   |)" );
-            vRip.emplace_back( R"(|     %                         .   |)" );
-            vRip.emplace_back( R"(|  @`                            %% |)" );
-            vRip.emplace_back( R"(| %@%@%\                *      %`%@%|)" );
-            vRip.emplace_back( R"(%%@@@.%@%\%%            `\  %%.%%@@%@)" );
-            vRip.emplace_back( R"(@%@@%%%%%@@@@@@%%%%%%%%@@%%@@@%%%@%%@)" );
-        }
-
-        const point iOffset( TERMX > FULL_SCREEN_WIDTH ? ( TERMX - FULL_SCREEN_WIDTH ) / 2 : 0,
-                             TERMY > FULL_SCREEN_HEIGHT ? ( TERMY - FULL_SCREEN_HEIGHT ) / 2 : 0 );
-
-        catacurses::window w_rip = catacurses::newwin( FULL_SCREEN_HEIGHT, FULL_SCREEN_WIDTH,
-                                   iOffset );
-        draw_border( w_rip );
-
-        sfx::do_player_death_hurt( get_player_character(), true );
-        sfx::fade_audio_group( sfx::group::weather, 2000 );
-        sfx::fade_audio_group( sfx::group::time_of_day, 2000 );
-        sfx::fade_audio_group( sfx::group::context_themes, 2000 );
-        sfx::fade_audio_group( sfx::group::fatigue, 2000 );
-
-        for( size_t iY = 0; iY < vRip.size(); ++iY ) {
-            size_t iX = 0;
-            const char *str = vRip[iY].data();
-            for( int slen = vRip[iY].size(); slen > 0; ) {
-                const uint32_t cTemp = UTF8_getch( &str, &slen );
-                if( cTemp != U' ' ) {
-                    nc_color ncColor = c_light_gray;
-
-                    if( cTemp == U'%' ) {
-                        ncColor = c_green;
-
-                    } else if( cTemp == U'_' || cTemp == U'|' ) {
-                        ncColor = c_white;
-
-                    } else if( cTemp == U'@' ) {
-                        ncColor = c_brown;
-
-                    } else if( cTemp == U'*' ) {
-                        ncColor = c_red;
-                    }
-
-                    mvwputch( w_rip, point( iX + FULL_SCREEN_WIDTH / 2 - ( iMaxWidth / 2 ), iY + 1 ), ncColor,
-                              cTemp );
-                }
-                iX += mk_wcwidth( cTemp );
-            }
-        }
-
-        std::string sTemp;
-
-        center_print( w_rip, iInfoLine++, c_white, _( "Survived:" ) );
-
-        const time_duration survived = calendar::turn - calendar::start_of_game;
-        const int minutes = to_minutes<int>( survived ) % 60;
-        const int hours = to_hours<int>( survived ) % 24;
-        const int days = to_days<int>( survived );
-
-        if( days > 0 ) {
-            // NOLINTNEXTLINE(cata-translate-string-literal)
-            sTemp = string_format( "%dd %dh %dm", days, hours, minutes );
-        } else if( hours > 0 ) {
-            // NOLINTNEXTLINE(cata-translate-string-literal)
-            sTemp = string_format( "%dh %dm", hours, minutes );
-        } else {
-            // NOLINTNEXTLINE(cata-translate-string-literal)
-            sTemp = string_format( "%dm", minutes );
-        }
-
-        center_print( w_rip, iInfoLine++, c_white, sTemp );
-
-        const int iTotalKills = g->get_kill_tracker().monster_kill_count();
-
-        sTemp = _( "Kills:" );
-        mvwprintz( w_rip, point( FULL_SCREEN_WIDTH / 2 - 5, 1 + iInfoLine++ ), c_light_gray,
-                   ( sTemp + " " ) );
-        wprintz( w_rip, c_magenta, "%d", iTotalKills );
-
-        sTemp = _( "In memory of:" );
-        mvwprintz( w_rip, point( FULL_SCREEN_WIDTH / 2 - utf8_width( sTemp ) / 2, iNameLine++ ),
-                   c_light_gray,
-                   sTemp );
-
-        sTemp = u.get_name();
-        mvwprintz( w_rip, point( FULL_SCREEN_WIDTH / 2 - utf8_width( sTemp ) / 2, iNameLine++ ), c_white,
-                   sTemp );
-
-        sTemp = _( "Last Words:" );
-        mvwprintz( w_rip, point( FULL_SCREEN_WIDTH / 2 - utf8_width( sTemp ) / 2, iNameLine++ ),
-                   c_light_gray,
-                   sTemp );
-
-        int iStartX = FULL_SCREEN_WIDTH / 2 - ( ( iMaxWidth - 4 ) / 2 );
-        std::string sLastWords = string_input_popup()
-                                 .window( w_rip, point( iStartX, iNameLine ), iStartX + iMaxWidth - 4 - 1 )
-                                 .max_length( iMaxWidth - 4 - 1 )
-                                 .query_string();
         g->death_screen();
-        const bool is_suicide = g->uquit == QUIT_SUICIDE;
         std::chrono::seconds time_since_load =
             std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - g->time_of_last_load );
         std::chrono::seconds total_time_played = g->time_played_at_last_load + time_since_load;
-        get_event_bus().send<event_type::game_over>( is_suicide, sLastWords, total_time_played );
+        get_event_bus().send<event_type::game_over>( total_time_played );
         // Struck the save_player_data here to forestall Weirdness
         g->move_save_to_graveyard();
-        g->write_memorial_file( sLastWords );
+        g->write_memorial_file( g->stats().value_of( event_statistic_last_words )
+                                .get<cata_variant_type::string>() );
         get_memorial().clear();
         std::vector<std::string> characters = g->list_active_saves();
         // remove current player from the active characters list, as they are dead
@@ -339,14 +200,14 @@ bool cleanup_at_end()
     }
 
     //Reset any offset due to driving
-    g->set_driving_view_offset( point_zero );
+    g->set_driving_view_offset( point_rel_ms::zero );
 
     //clear all sound channels
     sfx::fade_audio_channel( sfx::channel::any, 300 );
     sfx::fade_audio_group( sfx::group::weather, 300 );
     sfx::fade_audio_group( sfx::group::time_of_day, 300 );
     sfx::fade_audio_group( sfx::group::context_themes, 300 );
-    sfx::fade_audio_group( sfx::group::fatigue, 300 );
+    sfx::fade_audio_group( sfx::group::low_stamina, 300 );
 
     zone_manager::get_manager().clear();
 
@@ -407,16 +268,18 @@ void monmove()
 
     for( monster &critter : g->all_monsters() ) {
         // Critters in impassable tiles get pushed away, unless it's not impassable for them
-        if( !critter.is_dead() && m.impassable( critter.pos() ) && !critter.can_move_to( critter.pos() ) ) {
+        if( !critter.is_dead() && ( m.impassable( critter.pos_bub() ) &&
+                                    !m.get_impassable_field_at( critter.pos_bub() ).has_value() ) &&
+            !critter.can_move_to( critter.pos_bub() ) ) {
             dbg( D_ERROR ) << "game:monmove: " << critter.name()
                            << " can't move to its location!  (" << critter.posx()
                            << ":" << critter.posy() << ":" << critter.posz() << "), "
-                           << m.tername( critter.pos() );
+                           << m.tername( critter.pos_bub() );
             add_msg_debug( debugmode::DF_MONSTER, "%s can't move to its location!  (%d,%d,%d), %s",
                            critter.name(),
-                           critter.posx(), critter.posy(), critter.posz(), m.tername( critter.pos() ) );
+                           critter.posx(), critter.posy(), critter.posz(), m.tername( critter.pos_bub() ) );
             bool okay = false;
-            for( const tripoint &dest : m.points_in_radius( critter.pos(), 3 ) ) {
+            for( const tripoint_bub_ms &dest : m.points_in_radius( critter.pos_bub(), 3 ) ) {
                 if( critter.can_move_to( dest ) && g->is_empty( dest ) ) {
                     critter.setpos( dest );
                     okay = true;
@@ -435,20 +298,21 @@ void monmove()
 
         m.creature_in_field( critter );
         if( calendar::once_every( 1_days ) ) {
-            if( critter.has_flag( MF_MILKABLE ) ) {
+            if( critter.has_flag( mon_flag_MILKABLE ) ) {
                 critter.refill_udders();
             }
             critter.try_biosignature();
             critter.try_reproduce();
+            critter.digest_food();
         }
-        while( critter.moves > 0 && !critter.is_dead() && !critter.has_effect( effect_ridden ) ) {
+        while( critter.get_moves() > 0 && !critter.is_dead() && !critter.has_effect( effect_ridden ) ) {
             critter.made_footstep = false;
             // Controlled critters don't make their own plans
             if( !critter.has_effect( effect_controlled ) ) {
                 // Formulate a path to follow
                 critter.plan();
             } else {
-                critter.moves = 0;
+                critter.set_moves( 0 );
                 break;
             }
             critter.move(); // Move one square, possibly hit u
@@ -459,7 +323,7 @@ void monmove()
         if( !critter.is_dead() &&
             u.has_active_bionic( bio_alarm ) &&
             u.get_power_level() >= bio_alarm->power_trigger &&
-            rl_dist( u.pos(), critter.pos() ) <= 5 &&
+            rl_dist( u.pos_bub(), critter.pos_bub() ) <= 5 &&
             !critter.is_hallucination() ) {
             u.mod_power_level( -bio_alarm->power_trigger );
             add_msg( m_warning, _( "Your motion alarm goes off!" ) );
@@ -476,18 +340,13 @@ void monmove()
     // The remaining monsters are all alive, but may be outside of the reality bubble.
     // If so, despawn them. This is not the same as dying, they will be stored for later and the
     // monster::die function is not called.
-    for( monster &critter : g->all_monsters() ) {
-        if( critter.posx() < 0 - MAPSIZE_X / 6 ||
-            critter.posy() < 0 - MAPSIZE_Y / 6 ||
-            critter.posx() > ( MAPSIZE_X * 7 ) / 6 ||
-            critter.posy() > ( MAPSIZE_Y * 7 ) / 6 ) {
-            g->despawn_monster( critter );
-        }
-    }
+    g->despawn_nonlocal_monsters();
 
     // Now, do active NPCs.
     for( npc &guy : g->all_npcs() ) {
         int turns = 0;
+        int real_count = 0;
+        const int count_limit = std::max( 10, guy.get_moves() / 64 );
         if( guy.is_mounted() ) {
             guy.check_mount_is_spooked();
         }
@@ -496,27 +355,23 @@ void monmove()
             guy.process_turn();
         }
         while( !guy.is_dead() && ( !guy.in_sleep_state() || guy.activity.id() == ACT_OPERATION ) &&
-               guy.moves > 0 && turns < 10 ) {
-            int moves = guy.moves;
+               guy.get_moves() > 0 && turns < 10 ) {
+            const int moves = guy.get_moves();
+            const bool has_destination = guy.has_destination_activity();
             guy.move();
-            if( moves == guy.moves ) {
+            if( moves == guy.get_moves() ) {
                 // Count every time we exit npc::move() without spending any moves.
-                turns++;
+                real_count++;
+                if( has_destination == guy.has_destination_activity() || real_count > count_limit ) {
+                    turns++;
+                }
             }
-
             // Turn on debug mode when in infinite loop
             // It has to be done before the last turn, otherwise
             // there will be no meaningful debug output.
             if( turns == 9 ) {
-                debugmsg( "NPC %s entered infinite loop.  Turning on debug mode",
-                          guy.get_name() );
-                debug_mode = true;
-                // make sure the filter is active
-                if( std::find(
-                        debugmode::enabled_filters.begin(), debugmode::enabled_filters.end(),
-                        debugmode::DF_NPC ) == debugmode::enabled_filters.end() ) {
-                    debugmode::enabled_filters.emplace_back( debugmode::DF_NPC );
-                }
+                debugmsg( "NPC '%s' entered infinite loop, npc activity id: '%s'",
+                          guy.get_name(), guy.activity.id().str() );
             }
         }
 
@@ -544,25 +399,25 @@ void overmap_npc_move()
             continue;
         }
         npc *npc_to_add = elem.get();
-        if( ( !npc_to_add->is_active() || rl_dist( u.pos(), npc_to_add->pos() ) > SEEX * 2 ) &&
+        if( ( !npc_to_add->is_active() || rl_dist( u.pos_bub(), npc_to_add->pos_bub() ) > SEEX * 2 ) &&
             npc_to_add->mission == NPC_MISSION_TRAVELLING ) {
             travelling_npcs.push_back( npc_to_add );
         }
     }
     bool npcs_need_reload = false;
-    for( auto &elem : travelling_npcs ) {
+    for( npc *&elem : travelling_npcs ) {
         if( elem->has_omt_destination() ) {
             if( !elem->omt_path.empty() ) {
-                if( rl_dist( elem->omt_path.back(), elem->global_omt_location() ) > 2 ) {
+                if( rl_dist( elem->omt_path.back(), elem->pos_abs_omt() ) > 2 ) {
                     // recalculate path, we got distracted doing something else probably
                     elem->omt_path.clear();
-                } else if( elem->omt_path.back() == elem->global_omt_location() ) {
+                } else if( elem->omt_path.back() == elem->pos_abs_omt() ) {
                     elem->omt_path.pop_back();
                 }
             }
             if( elem->omt_path.empty() ) {
-                elem->omt_path = overmap_buffer.get_travel_path( elem->global_omt_location(), elem->goal,
-                                 overmap_path_params::for_npc() );
+                elem->omt_path = overmap_buffer.get_travel_path( elem->pos_abs_omt(), elem->goal,
+                                 overmap_path_params::for_npc() ).points;
                 if( elem->omt_path.empty() ) { // goal is unreachable, or already reached goal, reset it
                     elem->goal = npc::no_goal_point;
                 }
@@ -590,15 +445,26 @@ bool do_turn()
     if( g->is_game_over() ) {
         return turn_handler::cleanup_at_end();
     }
+
+    weather_manager &weather = get_weather();
     // Actual stuff
-    if( g-> new_game ) {
+    if( g->new_game ) {
         g->new_game = false;
+        if( get_option<std::string>( "ETERNAL_WEATHER" ) != "normal" ) {
+            weather.weather_override = static_cast<weather_type_id>
+                                       ( get_option<std::string>( "ETERNAL_WEATHER" ) );
+            weather.set_nextweather( calendar::turn );
+        } else {
+            weather.weather_override = WEATHER_NULL;
+            weather.set_nextweather( calendar::turn );
+        }
     } else {
         g->gamemode->per_turn();
         calendar::turn += 1_turns;
     }
 
-    weather_manager &weather = get_weather();
+    play_music( music::get_music_id_string() );
+
     // starting a new turn, clear out temperature cache
     weather.temperature_cache.clear();
 
@@ -613,11 +479,18 @@ bool do_turn()
     map &m = get_map();
     // If controlling a vehicle that is owned by someone else
     if( u.in_vehicle && u.controlling_vehicle ) {
-        vehicle *veh = veh_pointer_or_null( m.veh_at( u.pos() ) );
-        if( veh && !veh->handle_potential_theft( dynamic_cast<Character &>( u ), true ) ) {
-            veh->handle_potential_theft( dynamic_cast<Character &>( u ), false, false );
+        vehicle *veh = veh_pointer_or_null( m.veh_at( u.pos_bub() ) );
+        if( veh && !veh->handle_potential_theft( u, true ) ) {
+            veh->handle_potential_theft( u, false, false );
         }
     }
+
+    // If you're inside a wall or something and haven't been telefragged, let's get you out.
+    if( ( m.impassable( u.pos_bub() ) && !m.impassable_field_at( u.pos_bub() ) ) &&
+        !m.has_flag( ter_furn_flag::TFLAG_CLIMBABLE, u.pos_bub() ) ) {
+        u.stagger();
+    }
+
     // If riding a horse - chance to spook
     if( u.is_mounted() ) {
         u.check_mount_is_spooked();
@@ -628,7 +501,10 @@ bool do_turn()
 
     // Move hordes every 2.5 min
     if( calendar::once_every( time_duration::from_minutes( 2.5 ) ) ) {
-        overmap_buffer.move_hordes();
+
+        if( get_option<bool>( "WANDER_SPAWNS" ) ) {
+            overmap_buffer.move_hordes();
+        }
         if( u.has_trait( trait_HAS_NEMESIS ) ) {
             overmap_buffer.move_nemesis();
         }
@@ -651,16 +527,19 @@ bool do_turn()
     weather.update_weather();
     g->reset_light_level();
 
-    g->perhaps_add_random_npc();
-    while( u.moves > 0 && u.activity ) {
+    g->perhaps_add_random_npc( /* ignore_spawn_timers_and_rates = */ false );
+    while( u.get_moves() > 0 && u.activity ) {
         u.activity.do_turn( u );
     }
+
     // Process NPC sound events before they move or they hear themselves talking
     for( npc &guy : g->all_npcs() ) {
-        if( rl_dist( guy.pos(), u.pos() ) < MAX_VIEW_DISTANCE ) {
+        if( rl_dist( guy.pos_bub(), u.pos_bub() ) < MAX_VIEW_DISTANCE ) {
             sounds::process_sound_markers( &guy );
         }
     }
+
+    music::deactivate_music_id( music::music_id::sound );
 
     // Process sound events into sound markers for display to the player.
     sounds::process_sound_markers( &u );
@@ -670,20 +549,22 @@ bool do_turn()
     }
 
     if( !u.has_effect( effect_sleep ) || g->uquit == QUIT_WATCH ) {
-        if( u.moves > 0 || g->uquit == QUIT_WATCH ) {
-            while( u.moves > 0 || g->uquit == QUIT_WATCH ) {
+        if( u.get_moves() > 0 || g->uquit == QUIT_WATCH ) {
+            while( u.get_moves() > 0 || g->uquit == QUIT_WATCH ) {
+                m.process_falling();
                 g->cleanup_dead();
                 g->mon_info_update();
                 // Process any new sounds the player caused during their turn.
                 for( npc &guy : g->all_npcs() ) {
-                    if( rl_dist( guy.pos(), u.pos() ) < MAX_VIEW_DISTANCE ) {
+                    if( rl_dist( guy.pos_bub(), u.pos_bub() ) < MAX_VIEW_DISTANCE ) {
                         sounds::process_sound_markers( &guy );
                     }
                 }
+                explosion_handler::process_explosions();
                 sounds::process_sound_markers( &u );
                 if( !u.activity && g->uquit != QUIT_WATCH
                     && ( !u.has_distant_destination() || calendar::once_every( 10_seconds ) ) ) {
-                    g->wait_popup.reset();
+                    g->wait_popup_reset();
                     ui_manager::redraw();
                 }
 
@@ -704,7 +585,7 @@ bool do_turn()
                 if( g->uquit == QUIT_WATCH ) {
                     break;
                 }
-                while( u.moves > 0 && u.activity ) {
+                while( u.get_moves() > 0 && u.activity ) {
                     u.activity.do_turn( u );
                 }
             }
@@ -714,9 +595,9 @@ bool do_turn()
         } else {
             // Rate limit key polling to 10 times a second.
             static auto start = std::chrono::time_point_cast<std::chrono::milliseconds>(
-                                    std::chrono::system_clock::now() );
+                                    std::chrono::steady_clock::now() );
             const auto now = std::chrono::time_point_cast<std::chrono::milliseconds>(
-                                 std::chrono::system_clock::now() );
+                                 std::chrono::steady_clock::now() );
             if( ( now - start ).count() > 100 ) {
                 handle_key_blocking_activity();
                 start = now;
@@ -737,22 +618,22 @@ bool do_turn()
         }
     }
 
-    if( g->driving_view_offset.x != 0 || g->driving_view_offset.y != 0 ) {
+    if( g->driving_view_offset.x() != 0 || g->driving_view_offset.y() != 0 ) {
         // Still have a view offset, but might not be driving anymore,
         // or the option has been deactivated,
         // might also happen when someone dives from a moving car.
         // or when using the handbrake.
-        vehicle *veh = veh_pointer_or_null( m.veh_at( u.pos() ) );
+        vehicle *veh = veh_pointer_or_null( m.veh_at( u.pos_bub() ) );
         g->calc_driving_offset( veh );
     }
 
     scent_map &scent = get_scent();
     // No-scent debug mutation has to be processed here or else it takes time to start working
     if( !u.has_flag( STATIC( json_character_flag( "NO_SCENT" ) ) ) ) {
-        scent.set( u.pos(), u.scent, u.get_type_of_scent() );
-        overmap_buffer.set_scent( u.global_omt_location(),  u.scent );
+        scent.set( u.pos_bub(), u.scent, u.get_type_of_scent() );
+        overmap_buffer.set_scent( u.pos_abs_omt(),  u.scent );
     }
-    scent.update( u.pos(), m );
+    scent.update( u.pos_bub(), m );
 
     // We need floor cache before checking falling 'n stuff
     m.build_floor_caches();
@@ -771,17 +652,17 @@ bool do_turn()
     // consider a stripped down cache just for monsters.
     m.build_map_cache( levz, true );
     monmove();
-    if( calendar::once_every( 5_minutes ) ) {
+    if( calendar::once_every( time_between_npc_OM_moves ) ) {
         overmap_npc_move();
     }
     if( calendar::once_every( 10_seconds ) ) {
-        for( const tripoint &elem : m.get_furn_field_locations() ) {
+        for( const tripoint_bub_ms &elem : m.get_furn_field_locations() ) {
             const furn_t &furn = *m.furn( elem );
             for( const emit_id &e : furn.emissions ) {
                 m.emit_field( elem, e );
             }
         }
-        for( const tripoint &elem : m.get_ter_field_locations() ) {
+        for( const tripoint_bub_ms &elem : m.get_ter_field_locations() ) {
             const ter_t &ter = *m.ter( elem );
             for( const emit_id &e : ter.emissions ) {
                 m.emit_field( elem, e );
@@ -790,7 +671,7 @@ bool do_turn()
     }
     g->mon_info_update();
     u.process_turn();
-    if( u.moves < 0 && get_option<bool>( "FORCE_REDRAW" ) ) {
+    if( u.get_moves() < 0 && get_option<bool>( "FORCE_REDRAW" ) ) {
         ui_manager::redraw();
         refresh_display();
     }
@@ -807,7 +688,7 @@ bool do_turn()
         wait_redraw = true;
         wait_message = _( "Wait till you wake up…" );
         wait_refresh_rate = 30_minutes;
-    } else if( const cata::optional<std::string> progress = u.activity.get_progress_message( u ) ) {
+    } else if( const std::optional<std::string> progress = u.activity.get_progress_message( u ) ) {
         wait_redraw = true;
         wait_message = *progress;
         if( u.activity.is_interruptible() && u.activity.interruptable_with_kb ) {
@@ -815,6 +696,8 @@ bool do_turn()
         }
         if( u.activity.id() == ACT_AUTODRIVE ) {
             wait_refresh_rate = 1_turns;
+        } else if( u.activity.id() == ACT_FIRSTAID ) {
+            wait_refresh_rate = 5_turns;
         } else {
             wait_refresh_rate = 5_minutes;
         }
@@ -828,7 +711,9 @@ bool do_turn()
 
             // Avoid redrawing the main UI every time due to invalidation
             ui_adaptor dummy( ui_adaptor::disable_uis_below {} );
-            g->wait_popup = std::make_unique<static_popup>();
+            if( !g->wait_popup ) {
+                g->wait_popup = std::make_unique<static_popup>();
+            }
             g->wait_popup->on_top( true ).wait_message( "%s", wait_message );
             ui_manager::redraw();
             refresh_display();
@@ -836,9 +721,11 @@ bool do_turn()
         }
     } else {
         // Nothing to wait for now
-        g->wait_popup.reset();
+        g->wait_popup_reset();
         g->first_redraw_since_waiting_started = true;
     }
+
+    m.invalidate_visibility_cache();
 
     u.update_bodytemp();
     u.update_body_wetness( *weather.weather_precise );
@@ -846,6 +733,10 @@ bool do_turn()
 
     if( calendar::once_every( 1_minutes ) ) {
         u.update_morale();
+        for( npc &guy : g->all_npcs() ) {
+            guy.update_morale();
+            guy.check_and_recover_morale();
+        }
     }
 
     if( calendar::once_every( 9_turns ) ) {
@@ -858,10 +749,20 @@ bool do_turn()
     sfx::do_danger_music();
     sfx::do_vehicle_engine_sfx();
     sfx::do_vehicle_exterior_engine_sfx();
-    sfx::do_fatigue();
+    sfx::do_low_stamina_sfx();
 
     // reset player noise
     u.volume = 0;
+
+    // Calculate bionic power balance
+    u.power_balance = u.get_power_level() - u.power_prev_turn;
+    u.power_prev_turn = u.get_power_level();
+
+#if defined(EMSCRIPTEN)
+    // This will cause a prompt to be shown if the window is closed, until the
+    // game is saved.
+    EM_ASM( window.game_unsaved = true; );
+#endif
 
     return false;
 }

@@ -1,3 +1,4 @@
+from .enchant import parse_enchant
 from ..helper import get_singular_name
 from ..write_text import write_text
 
@@ -51,8 +52,21 @@ def parse_mutation(json, origin):
                                comment="Trigger message of mutation \"{}\""
                                .format(name))
 
+    if "variants" in json:
+        for variant in json["variants"]:
+            variant_name = get_singular_name(variant["name"])
+            write_text(variant["name"], origin,
+                       comment="Variant name of mutation \"{}\"".format(name))
+            write_text(variant["description"], origin,
+                       comment="Description of variant " +
+                       "\"{1}\" of mutation\"{0}\"".format(name, variant_name))
+
     if "transform" in json:
         write_text(json["transform"]["msg_transform"], origin,
                    comment="Message when transforming from mutation "
                    " \"{}\" to \"{}\""
                    .format(name, json["transform"]["target"]))
+
+    if "enchantments" in json:
+        for enchantment in json["enchantments"]:
+            parse_enchant(enchantment, origin)

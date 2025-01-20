@@ -3,6 +3,7 @@
     "type": "recipe",
     "result": "faction_base_lightindustry_workshop_0",
     "description": "Survey Light Industry Workshop.",
+    "activity_level": "MODERATE_EXERCISE",
     "category": "CC_BUILDING",
     "subcategory": "CSC_BUILDING_BASES",
     "skill_used": "fabrication",
@@ -19,7 +20,7 @@
       { "id": "industrial_recipes_air_compressor" },
       { "id": "fbmc_lightindustry_workshop" }
     ],
-    "blueprint_resources": [ "fake_heavy_lathe", "fake_drill_press", "fake_hydraulic_press", "fake_air_compressor", "fake_arc_furnace" ],
+    "blueprint_resources": [ "heavy_lathe_tool", "drill_press_tool", "hydraulic_press_tool", "air_compressor_tool", "fake_arc_furnace" ],
     "blueprint_requires": [ { "id": "not_an_upgrade" } ],
     "blueprint_name": "expansion survey",
     "check_blueprint_needs": false
@@ -28,6 +29,7 @@
     "type": "recipe",
     "result": "faction_base_lightindustry_workshop_drop_hammer",
     "description": "Let's add a drop hammer for even more crafting possibilities.",
+    "activity_level": "MODERATE_EXERCISE",
     "category": "CC_BUILDING",
     "subcategory": "CSC_BUILDING_BASES",
     "skill_used": "fabrication",

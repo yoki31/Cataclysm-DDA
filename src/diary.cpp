@@ -1,33 +1,49 @@
 #include "diary.h"
 
-#include <string>
-#include <list>
-#include <iostream>
-#include <fstream>
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <utility>
 
 #include "avatar.h"
 #include "bionics.h"
 #include "calendar.h"
+#include "cata_path.h"
 #include "cata_utility.h"
+#include "catacharset.h"
+#include "color.h"
 #include "filesystem.h"
+#include "flexbuffer_json-inl.h"
+#include "flexbuffer_json.h"
 #include "game.h"
+#include "json.h"
+#include "json_error.h"
+#include "kill_tracker.h"
+#include "magic.h"
 #include "mission.h"
 #include "mtype.h"
 #include "mutation.h"
+#include "npc.h"
 #include "output.h"
 #include "path_info.h"
+#include "pimpl.h"
+#include "proficiency.h"
 #include "skill.h"
 #include "string_formatter.h"
+#include "translation.h"
+#include "translations.h"
 #include "type_id.h"
+#include "weather.h"
 
 diary_page::diary_page() = default;
 
 std::vector<std::string> diary::get_pages_list()
 {
     std::vector<std::string> result;
+    result.reserve( pages.size() );
     for( std::unique_ptr<diary_page> &n : pages ) {
-        result.push_back( to_string( n->turn ) );
+        result.push_back( get_diary_time_str( n->turn, n->time_acc ) );
     }
     return result;
 }
@@ -48,11 +64,10 @@ int diary::set_opened_page( int pagenum )
     return opened_page;
 }
 
-int diary::get_opened_page_num()
+int diary::get_opened_page_num() const
 {
     return opened_page;
 }
-
 
 diary_page *diary::get_page_ptr( int offset )
 {
@@ -63,15 +78,13 @@ diary_page *diary::get_page_ptr( int offset )
     return nullptr;
 }
 
-void diary::add_to_change_list( std::string entry, std::string desc )
+void diary::add_to_change_list( const std::string &entry, const std::string &desc )
 {
     if( !desc.empty() ) {
         desc_map[change_list.size()] = desc;
     }
     change_list.push_back( entry );
 }
-
-
 
 void diary::spell_changes()
 {
@@ -122,8 +135,6 @@ void diary::spell_changes()
     }
 }
 
-
-
 void diary::mission_changes()
 {
     diary_page *currpage = get_page_ptr();
@@ -132,7 +143,7 @@ void diary::mission_changes()
         return;
     }
     if( prevpage == nullptr ) {
-        auto add_missions = [&]( const std::string name, const std::vector<int> *missions ) {
+        auto add_missions = [&]( const std::string & name, const std::vector<int> *missions ) {
             if( !missions->empty() ) {
                 bool flag = true;
 
@@ -156,7 +167,7 @@ void diary::mission_changes()
         add_missions( _( "Failed missions:" ), &currpage->mission_failed );
 
     } else {
-        auto add_missions = [&]( const std::string name, const std::vector<int> *missions,
+        auto add_missions = [&]( const std::string & name, const std::vector<int> *missions,
         const std::vector<int> *prevmissions ) {
             bool flag = true;
             for( const int uid : *missions ) {
@@ -300,7 +311,6 @@ void diary::kill_changes()
                                         color ) + " " + colorize( nname, c_light_gray ), m.get_description() );
                 }
 
-
             }
             if( !flag ) {
                 add_to_change_list( " " );
@@ -330,7 +340,6 @@ void diary::kill_changes()
         }
     }
 }
-
 
 void diary::skill_changes()
 {
@@ -390,25 +399,23 @@ void diary::trait_changes()
     if( prevpage == nullptr ) {
         if( !currpage->traits.empty() ) {
             add_to_change_list( _( "Mutations:" ) );
-            for( const trait_id &elem : currpage->traits ) {
-                const mutation_branch &trait = elem.obj();
-                add_to_change_list( colorize( trait.name(), trait.get_display_color() ), trait.desc() );
+            for( const trait_and_var &elem : currpage->traits ) {
+                add_to_change_list( colorize( elem.name(), elem.trait->get_display_color() ), elem.desc() );
             }
             add_to_change_list( "" );
         }
     } else {
         if( prevpage->traits.empty() && !currpage->traits.empty() ) {
             add_to_change_list( _( "Mutations:" ) );
-            for( const trait_id &elem : currpage->traits ) {
-                const mutation_branch &trait = elem.obj();
-                add_to_change_list( colorize( trait.name(), trait.get_display_color() ), trait.desc() );
+            for( const trait_and_var &elem : currpage->traits ) {
+                add_to_change_list( colorize( elem.name(), elem.trait->get_display_color() ), elem.desc() );
 
             }
             add_to_change_list( "" );
         } else {
 
             bool flag = true;
-            for( const trait_id &elem : currpage->traits ) {
+            for( const trait_and_var &elem : currpage->traits ) {
 
                 if( std::find( prevpage->traits.begin(), prevpage->traits.end(),
                                elem ) == prevpage->traits.end() ) {
@@ -416,8 +423,7 @@ void diary::trait_changes()
                         add_to_change_list( _( "Gained Mutation: " ) );
                         flag = false;
                     }
-                    const mutation_branch &trait = elem.obj();
-                    add_to_change_list( colorize( trait.name(), trait.get_display_color() ), trait.desc() );
+                    add_to_change_list( colorize( elem.name(), elem.trait->get_display_color() ), elem.desc() );
                 }
 
             }
@@ -426,16 +432,15 @@ void diary::trait_changes()
             }
 
             flag = true;
-            for( const trait_id &elem : prevpage->traits ) {
+            for( const trait_and_var &elem : prevpage->traits ) {
 
                 if( std::find( currpage->traits.begin(), currpage->traits.end(),
                                elem ) == currpage->traits.end() ) {
                     if( flag ) {
-                        add_to_change_list( _( "Lost Mutation " ) );
+                        add_to_change_list( _( "Lost Mutation: " ) );
                         flag = false;
                     }
-                    const mutation_branch &trait = elem.obj();
-                    add_to_change_list( colorize( trait.name(), trait.get_display_color() ), trait.desc() );
+                    add_to_change_list( colorize( elem.name(), elem.trait->get_display_color() ), elem.desc() );
                 }
             }
             if( !flag ) {
@@ -569,7 +574,6 @@ std::map<int, std::string> diary::get_desc_map()
     }
 }
 
-
 std::string diary::get_page_text()
 {
 
@@ -584,26 +588,12 @@ std::string diary::get_head_text()
 
     if( !pages.empty() ) {
         const diary_page *prevpageptr = get_page_ptr( -1 );
+        const diary_page *currpageptr = get_page_ptr();
         const time_point prev_turn = ( prevpageptr != nullptr ) ? prevpageptr->turn : calendar::turn_zero;
-        const time_duration turn_diff = get_page_ptr()->turn - prev_turn;
-        const int days = to_days<int>( turn_diff );
-        const int hours = to_hours<int>( turn_diff ) % 24;
-        const int minutes = to_minutes<int>( turn_diff ) % 60;
+        const time_duration turn_diff = currpageptr->turn - prev_turn;
         std::string time_diff_text;
         if( opened_page != 0 ) {
-            std::string days_text;
-            std::string hours_text;
-            std::string minutes_text;
-            if( days > 0 ) {
-                days_text = string_format( n_gettext( "%d day, ", "%d days, ", days ), days );
-            }
-            if( hours > 0 ) {
-                hours_text = string_format( n_gettext( "%d hour, ", "%d hours, ", hours ), hours );
-            }
-            minutes_text = string_format( n_gettext( "%d minute", "%d minutes", minutes ), minutes );
-            //~ %1$s is xx days, %2$s is xx hours, %3$s is xx minutes
-            time_diff_text = string_format( _( "%1$s%2$s%3$s since last entry" ),
-                                            days_text, hours_text, minutes_text );
+            time_diff_text = get_diary_time_since_str( turn_diff, currpageptr->time_acc );
         }
         //~ Head text of a diary page
         //~ %1$d is the current page number, %2$d is the number of pages in total
@@ -611,7 +601,7 @@ std::string diary::get_head_text()
         //~ %4$s is time relative to the previous page
         return string_format( _( "Entry: %1$d/%2$d, %3$s, %4$s" ),
                               opened_page + 1, pages.size(),
-                              to_string( get_page_ptr()->turn ),
+                              get_diary_time_str( currpageptr->turn, currpageptr->time_acc ),
                               time_diff_text );
     }
     return "";
@@ -632,17 +622,19 @@ diary::diary()
 }
 void diary::set_page_text( std::string text )
 {
-    get_page_ptr()->m_text = text;
+    get_page_ptr()->m_text = std::move( text );
 }
 
 void diary::new_page()
 {
     std::unique_ptr<diary_page> page( new diary_page() );
-    page -> m_text = " ";
+    page -> m_text = std::string();
     page -> turn = calendar::turn;
     page -> kills = g ->get_kill_tracker().kills;
     page -> npc_kills = g->get_kill_tracker().npc_kills;
     avatar *u = &get_avatar();
+    page -> time_acc = u->has_watch() ? time_accuracy::FULL :
+                       is_creature_outside( *u ) ? time_accuracy::PARTIAL : time_accuracy::NONE;
     page -> mission_completed = mission::to_uid_vector( u->get_completed_missions() );
     page -> mission_active = mission::to_uid_vector( u->get_active_missions() );
     page -> mission_failed = mission::to_uid_vector( u->get_failed_missions() );
@@ -651,7 +643,7 @@ void diary::new_page()
     page->dexterity = u->get_dex_base();
     page->intelligence = u->get_int_base();
     page->perception = u->get_per_base();
-    page->traits = u->get_mutations( false );
+    page->traits = u->get_mutations_variants( false );
     const auto spells = u->magic->get_spells();
     for( const spell *spell : spells ) {
         const spell_id &id = spell->id();
@@ -680,10 +672,11 @@ void diary::delete_page()
 
 void diary::export_to_txt( bool lastexport )
 {
-    cata::ofstream myfile;
-    std::string path = lastexport ? PATH_INFO::memorialdir() : PATH_INFO::world_base_save_path();
-    path += "/" + owner + "s_diary.txt";
-    myfile.open( fs::u8path( path ) );
+    std::ofstream myfile;
+    cata_path path = lastexport ? PATH_INFO::memorialdir_path() :
+                     PATH_INFO::world_base_save_path();
+    path = path / ( owner + "s_diary.txt" );
+    myfile.open( path.get_unrelative_path() );
 
     for( int i = 0; i < static_cast<int>( pages.size() ); i++ ) {
         set_opened_page( i );
@@ -693,8 +686,8 @@ void diary::export_to_txt( bool lastexport )
             myfile << remove_color_tags( str ) + "\n";
         }
         std::vector<std::string> folded_text = foldstring( page.m_text, 50 );
-        for( int i = 0; i < static_cast<int>( folded_text.size() ); i++ ) {
-            myfile << folded_text[i] + "\n";
+        for( const std::string &line : folded_text ) {
+            myfile << line + "\n";
         }
         myfile <<  "\n\n\n";
     }
@@ -704,7 +697,7 @@ void diary::export_to_txt( bool lastexport )
 bool diary::store()
 {
     std::string name = base64_encode( get_avatar().get_save_id() + "_diary" );
-    std::string path = PATH_INFO::world_base_save_path() +  "/" + name + ".json";
+    cata_path path = PATH_INFO::world_base_save_path() / ( name + ".json" );
     const bool iswriten = write_to_file( path, [&]( std::ostream & fout ) {
         serialize( fout );
     }, _( "diary data" ) );
@@ -728,6 +721,7 @@ void diary::serialize( JsonOut &jsout )
         jsout.start_object();
         jsout.member( "text", n->m_text );
         jsout.member( "turn", n->turn );
+        jsout.member( "time_accuracy", n->time_acc );
         jsout.member( "completed", n->mission_completed );
         jsout.member( "active", n->mission_active );
         // TODO: migrate "faild" to "failed"?
@@ -751,26 +745,18 @@ void diary::serialize( JsonOut &jsout )
     jsout.end_array();
 }
 
-
-
 void diary::load()
 {
     std::string name = base64_encode( get_avatar().get_save_id() + "_diary" );
-    std::string path = PATH_INFO::world_base_save_path() + "/" + name + ".json";
+    cata_path path = PATH_INFO::world_base_save_path() / ( name + ".json" );
     if( file_exist( path ) ) {
-        read_from_file( path, [&]( std::istream & fin ) {
-            deserialize( fin );
+        read_from_file_json( path, [&]( const JsonValue & jv ) {
+            deserialize( jv );
         } );
     }
 }
 
-void diary::deserialize( std::istream &fin )
-{
-    JsonIn jsin( fin );
-    deserialize( jsin );
-}
-
-void diary::deserialize( JsonIn &jsin )
+void diary::deserialize( const JsonValue &jsin )
 {
     try {
         JsonObject data = jsin.get_object();
@@ -781,6 +767,7 @@ void diary::deserialize( JsonIn &jsin )
             std::unique_ptr<diary_page> page( new diary_page() );
             page->m_text = elem.get_string( "text" );
             elem.read( "turn", page->turn );
+            elem.read( "time_accuracy", page->time_acc );
             elem.read( "active", page->mission_active );
             elem.read( "completed", page->mission_completed );
             // TODO: migrate "faild" to "failed"?

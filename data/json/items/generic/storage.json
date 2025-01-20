@@ -6,8 +6,8 @@
     "description": "A plastic clothes hanger with a metal hook to hang something on a rail.",
     "weight": "100 g",
     "volume": "150 ml",
-    "price": 100,
-    "price_postapoc": 0,
+    "price": "1 USD",
+    "price_postapoc": "0 cent",
     "material": [ "plastic", "steel" ],
     "symbol": ";",
     "color": "brown"
@@ -21,16 +21,15 @@
     "weight": "127 g",
     "volume": "500 ml",
     "longest_side": "45 cm",
-    "price": 4000,
-    "price_postapoc": 200,
-    "to_hit": -1,
+    "price": "40 USD",
+    "price_postapoc": "2 USD",
     "material": [ "nylon" ],
     "symbol": "[",
     "looks_like": "rope_6",
     "color": "light_gray",
     "pocket_data": [
       {
-        "description": "Small carabiner",
+        "description": "Small carabiner.",
         "pocket_type": "CONTAINER",
         "holster": true,
         "max_contains_volume": "2 L",
@@ -40,7 +39,7 @@
         "moves": 150
       },
       {
-        "description": "Small carabiner",
+        "description": "Small carabiner.",
         "pocket_type": "CONTAINER",
         "holster": true,
         "max_contains_volume": "2 L",
@@ -50,7 +49,7 @@
         "moves": 150
       },
       {
-        "description": "Small carabiner",
+        "description": "Small carabiner.",
         "pocket_type": "CONTAINER",
         "holster": true,
         "max_contains_volume": "2 L",
@@ -60,7 +59,7 @@
         "moves": 150
       },
       {
-        "description": "Large carabiner",
+        "description": "Large carabiner.",
         "pocket_type": "CONTAINER",
         "holster": true,
         "max_contains_volume": "4 L",
@@ -70,7 +69,7 @@
         "moves": 150
       },
       {
-        "description": "Large carabiner",
+        "description": "Large carabiner.",
         "pocket_type": "CONTAINER",
         "holster": true,
         "max_contains_volume": "4 L",

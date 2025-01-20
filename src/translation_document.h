@@ -4,10 +4,12 @@
 
 #if defined(LOCALIZE)
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "mmap_file.h"
 #include "translation_plural_evaluator.h"
 
 class InvalidTranslationDocumentException : public std::exception
@@ -31,33 +33,34 @@ enum class Endianness {
 class TranslationDocument
 {
     private:
-        std::string path;
+        std::shared_ptr<mmap_file> mmap_message_object;
         std::size_t number_of_strings; // N
         std::size_t original_strings_table_offset; // O
         std::size_t translated_strings_table_offset; // T
         // std::size_t hash_table_size; // S
         // std::size_t hash_table_offset; // H
-        std::string data;
+        const char *data;
+        std::size_t data_size;
         Endianness endianness;
         std::vector<std::size_t> original_offsets;
         std::vector<std::vector<std::size_t>> translated_offsets;
         std::unique_ptr<TranslationPluralRulesEvaluator> plural_rules;
 
-        std::uint8_t GetByte( const std::size_t byteIndex ) const;
-        std::uint32_t GetUint32BE( const std::size_t byteIndex ) const;
-        std::uint32_t GetUint32LE( const std::size_t byteIndex ) const;
+        std::uint8_t GetByte( std::size_t byteIndex ) const;
+        std::uint32_t GetUint32BE( std::size_t byteIndex ) const;
+        std::uint32_t GetUint32LE( std::size_t byteIndex ) const;
         std::uint32_t ( TranslationDocument::*GetUint32FPtr )( const std::size_t ) const;
-        std::uint32_t GetUint32( const std::size_t byteIndex ) const;
-        const char *GetString( const std::size_t byteIndex ) const;
+        std::uint32_t GetUint32( std::size_t byteIndex ) const;
+        const char *GetString( std::size_t byteIndex ) const;
         std::size_t EvaluatePluralForm( std::size_t n ) const;
     public:
         TranslationDocument() = delete;
         explicit TranslationDocument( const std::string &path );
 
         std::size_t Count() const;
-        const char *GetOriginalString( const std::size_t index ) const;
-        const char *GetTranslatedString( const std::size_t index ) const;
-        const char *GetTranslatedStringPlural( const std::size_t index, std::size_t n ) const;
+        const char *GetOriginalString( std::size_t index ) const;
+        const char *GetTranslatedString( std::size_t index ) const;
+        const char *GetTranslatedStringPlural( std::size_t index, std::size_t n ) const;
 };
 
 #endif // defined(LOCALIZE)

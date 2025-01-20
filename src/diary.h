@@ -2,18 +2,25 @@
 #ifndef CATA_SRC_DIARY_H
 #define CATA_SRC_DIARY_H
 
+#include <functional>
+#include <iosfwd>
+#include <map>
+#include <memory>
 #include <string>
-#include <list>
 #include <vector>
 
-#include "achievement.h"
-#include "character.h"
-#include "kill_tracker.h"
-#include "skill.h"
-#include "stats_tracker.h"
-#include "ui.h"
+#include "calendar.h"
+#include "mutation.h"
+#include "type_id.h"
 #include "units.h"
 
+class JsonOut;
+class JsonValue;
+
+namespace catacurses
+{
+class window;
+}  // namespace catacurses
 
 /// <summary>
 /// diary page, to save current character progression
@@ -27,6 +34,9 @@ struct diary_page {
     std::vector<std::string> diff_to_previous_page;
     /*turn the page was created*/
     time_point turn;
+    /*accuracy of time recorded in journal entry:
+    2 = player has a watch; 1 = player is able to see the sky; 0 = no idea what time is it now*/
+    time_accuracy time_acc = time_accuracy::NONE;
     /*mission ids for completed/active and failed missions*/
     std::vector<int> mission_completed;
     std::vector<int> mission_active;
@@ -42,8 +52,8 @@ struct diary_page {
     int dexterity = 0;
     int intelligence = 0;
     int perception = 0;
-    /*traits id the character has*/
-    std::vector<trait_id> traits;
+    /*traits id the character has - as well as their variant ids (empty if none)*/
+    std::vector<trait_and_var> traits;
     /*spells id with level the character has*/
     std::map<spell_id, int> known_spells;
     /*bionics id`s the character has*/
@@ -58,8 +68,9 @@ struct diary_page {
 };
 
 /// <summary>
-/// diary is connectet to the player avatar.
-/// the player is able to add new pages every page saves the current character progression and shows the improvements compared to the previous pages
+/// Diary is connected to the player avatar.
+/// The player is able to add new pages.
+/// Every page saves the current character progression and shows the improvements compared to the previous pages.
 /// The player is also able to add a Text in every page.
 /// </summary>
 class diary
@@ -75,15 +86,14 @@ class diary
         int opened_page = 0; // NOLINT(cata-serialize)
         /*list of changes from opened page to previous page*/
         std::vector<std::string> change_list; // NOLINT(cata-serialize)
-        /*maps discription to position in change list*/
+        /*maps description to position in change list*/
         std::map<int, std::string> desc_map; // NOLINT(cata-serialize)
 
-
-        //methoden
+        //methods
     public:
         diary();
         virtual ~diary() = default;
-        /*static methode to open a diary ui*/
+        /*static method to open a diary ui*/
         static void show_diary_ui( diary *c_diary );
         /*last entry in the diary, will be called after character death */
         void death_entry();
@@ -92,16 +102,12 @@ class diary
         bool store();
         void load();
         void serialize( std::ostream &fout );
-        void deserialize( std::istream &fin );
-        void deserialize( JsonIn &jsin );
+        void deserialize( const JsonValue &jsin );
         void serialize( JsonOut &jsout );
 
     private:
-        /*uses string_popup_window to edit the text on a page. Is not optimal,
-        because its just one line*/
-        void edit_page_ui();
         /*Uses editor window class to edit the text.*/
-        void edit_page_ui( catacurses::window &win );
+        void edit_page_ui( const std::function<catacurses::window()> &create_window );
         /*set page to be be shown in ui*/
         int set_opened_page( int pagenum );
         /*create a new page and adds current character progression*/
@@ -112,7 +118,7 @@ class diary
         void delete_page();
 
         /*get opened page nummer*/
-        int get_opened_page_num();
+        int get_opened_page_num() const;
         /*returns a list with all pages by the its date*/
         std::vector<std::string> get_pages_list();
         /*returns a list with all changes compared to the previous page*/
@@ -138,7 +144,7 @@ class diary
 
         /*expots the diary to a readable .txt file. If its the lastexport, its exportet to memorial otherwise its exportet to the world folder*/
         void export_to_txt( bool lastexport = false );
-        /*method for adding changes to the changelist. with the possibility to connect a desciption*/
-        void add_to_change_list( std::string entry, std::string desc = "" );
+        /*method for adding changes to the changelist. with the possibility to connect a description*/
+        void add_to_change_list( const std::string &entry, const std::string &desc = "" );
 };
 #endif // CATA_SRC_DIARY_H

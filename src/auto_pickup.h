@@ -3,25 +3,27 @@
 #define CATA_SRC_AUTO_PICKUP_H
 
 #include <functional>
-#include <iosfwd>
+#include <list>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "enums.h"
-#include "item_location.h"
 #include "item_stack.h"
 
-class JsonIn;
+class JsonArray;
 class JsonObject;
 class JsonOut;
 class item;
+class item_location;
 struct itype;
+struct tripoint;
 
 namespace auto_pickup
 {
 std::list<std::pair<item_location, int>> select_items(
-        const std::vector<item_stack::iterator> &from, const tripoint &location );
+        const std::vector<item_stack::iterator> &from, const tripoint_bub_ms &location );
 /**
  * The currently-active set of auto-pickup rules, in a form that allows quick
  * lookup. When this is filled (by @ref auto_pickup::create_rule()), every
@@ -67,7 +69,7 @@ class rule_list : public std::vector<rule>
 {
     public:
         void serialize( JsonOut &jsout ) const;
-        void deserialize( JsonIn &jsin );
+        void deserialize( const JsonArray &ja );
 
         void refresh_map_items( cache &map_items ) const;
 
@@ -90,7 +92,6 @@ class user_interface
 
         std::string title;
         std::vector<tab> tabs;
-        bool is_autopickup = false;
 
         void show();
 
@@ -157,7 +158,7 @@ class npc_settings : public base_settings
         void show( const std::string &name );
 
         void serialize( JsonOut &jsout ) const;
-        void deserialize( JsonIn &jsin );
+        void deserialize( const JsonArray &ja );
 
         bool empty() const;
 };

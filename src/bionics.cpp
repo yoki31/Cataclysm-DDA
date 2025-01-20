@@ -1,15 +1,18 @@
 #include "bionics.h"
 
-#include <algorithm> //std::min
+#include <algorithm>
 #include <climits>
 #include <cmath>
 #include <cstdlib>
+#include <cstdint>
 #include <forward_list>
-#include <functional>
 #include <iterator>
 #include <list>
 #include <memory>
+#include <optional>
+#include <ostream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 #include "action.h"
@@ -23,54 +26,64 @@
 #include "calendar.h"
 #include "cata_utility.h"
 #include "character.h"
+#include "character_attire.h"
 #include "character_martial_arts.h"
 #include "colony.h"
 #include "color.h"
+#include "condition.h"
+#include "coordinates.h"
+#include "creature.h"
 #include "damage.h"
 #include "debug.h"
+#include "dialogue.h"
 #include "dispersion.h"
 #include "effect.h"
 #include "effect_on_condition.h"
-#include "enum_conversions.h"
 #include "enums.h"
 #include "event.h"
 #include "event_bus.h"
 #include "explosion.h"
 #include "field_type.h"
 #include "flag.h"
+#include "flexbuffer_json-inl.h"
+#include "flexbuffer_json.h"
 #include "game.h"
 #include "generic_factory.h"
+#include "global_vars.h"
 #include "handle_liquid.h"
+#include "init.h"
 #include "inventory.h"
 #include "item.h"
 #include "item_location.h"
 #include "itype.h"
 #include "json.h"
+#include "json_error.h"
 #include "line.h"
+#include "magic_enchantment.h"
 #include "make_static.h"
 #include "map.h"
 #include "map_iterator.h"
 #include "mapdata.h"
 #include "material.h"
-#include "memorial_logger.h"
 #include "messages.h"
 #include "monster.h"
-#include "morale_types.h"
 #include "mutation.h"
 #include "npc.h"
-#include "optional.h"
 #include "options.h"
 #include "output.h"
 #include "overmapbuffer.h"
 #include "pimpl.h"
 #include "player_activity.h"
+#include "pocket_type.h"
 #include "point.h"
 #include "projectile.h"
 #include "requirements.h"
 #include "ret_val.h"
 #include "rng.h"
+#include "safe_reference.h"
 #include "sounds.h"
 #include "string_formatter.h"
+#include "talker.h"
 #include "teleport.h"
 #include "translations.h"
 #include "ui.h"
@@ -84,17 +97,19 @@
 
 static const activity_id ACT_OPERATION( "ACT_OPERATION" );
 
+static const ammo_effect_str_id ammo_effect_DRAW_AS_LINE( "DRAW_AS_LINE" );
+static const ammo_effect_str_id ammo_effect_JET( "JET" );
+static const ammo_effect_str_id ammo_effect_NO_DAMAGE_SCALING( "NO_DAMAGE_SCALING" );
+static const ammo_effect_str_id ammo_effect_NO_ITEM_DAMAGE( "NO_ITEM_DAMAGE" );
+
 static const bionic_id afs_bio_dopamine_stimulators( "afs_bio_dopamine_stimulators" );
-static const bionic_id bio_adrenaline( "bio_adrenaline" );
 static const bionic_id bio_blood_anal( "bio_blood_anal" );
-static const bionic_id bio_blood_filter( "bio_blood_filter" );
 static const bionic_id bio_cqb( "bio_cqb" );
 static const bionic_id bio_emp( "bio_emp" );
 static const bionic_id bio_evap( "bio_evap" );
 static const bionic_id bio_flashbang( "bio_flashbang" );
 static const bionic_id bio_geiger( "bio_geiger" );
 static const bionic_id bio_gills( "bio_gills" );
-static const bionic_id bio_hydraulics( "bio_hydraulics" );
 static const bionic_id bio_jointservo( "bio_jointservo" );
 static const bionic_id bio_lighter( "bio_lighter" );
 static const bionic_id bio_lockpick( "bio_lockpick" );
@@ -107,66 +122,36 @@ static const bionic_id bio_remote( "bio_remote" );
 static const bionic_id bio_resonator( "bio_resonator" );
 static const bionic_id bio_shockwave( "bio_shockwave" );
 static const bionic_id bio_teleport( "bio_teleport" );
-static const bionic_id bio_time_freeze( "bio_time_freeze" );
 static const bionic_id bio_torsionratchet( "bio_torsionratchet" );
 static const bionic_id bio_water_extractor( "bio_water_extractor" );
 
-static const efftype_id effect_adrenaline( "adrenaline" );
-static const efftype_id effect_antifungal( "antifungal" );
 static const efftype_id effect_assisted( "assisted" );
 static const efftype_id effect_asthma( "asthma" );
-static const efftype_id effect_badpoison( "badpoison" );
 static const efftype_id effect_bleed( "bleed" );
-static const efftype_id effect_bloodworms( "bloodworms" );
-static const efftype_id effect_cig( "cig" );
-static const efftype_id effect_datura( "datura" );
-static const efftype_id effect_dermatik( "dermatik" );
-static const efftype_id effect_drunk( "drunk" );
-static const efftype_id effect_fungus( "fungus" );
-static const efftype_id effect_hallu( "hallu" );
 static const efftype_id effect_heating_bionic( "heating_bionic" );
-static const efftype_id effect_high( "high" );
-static const efftype_id effect_iodine( "iodine" );
-static const efftype_id effect_meth( "meth" );
 static const efftype_id effect_narcosis( "narcosis" );
 static const efftype_id effect_operating( "operating" );
-static const efftype_id effect_paralyzepoison( "paralyzepoison" );
-static const efftype_id effect_pblue( "pblue" );
-static const efftype_id effect_pkill1( "pkill1" );
-static const efftype_id effect_pkill2( "pkill2" );
-static const efftype_id effect_pkill3( "pkill3" );
-static const efftype_id effect_pkill_l( "pkill_l" );
-static const efftype_id effect_poison( "poison" );
 static const efftype_id effect_sleep( "sleep" );
-static const efftype_id effect_stung( "stung" );
-static const efftype_id effect_teleglow( "teleglow" );
-static const efftype_id effect_tetanus( "tetanus" );
-static const efftype_id effect_took_flumed( "took_flumed" );
-static const efftype_id effect_took_prozac( "took_prozac" );
-static const efftype_id effect_took_prozac_bad( "took_prozac_bad" );
-static const efftype_id effect_took_xanax( "took_xanax" );
 static const efftype_id effect_under_operation( "under_operation" );
-static const efftype_id effect_venom_dmg( "venom_dmg" );
-static const efftype_id effect_venom_weaken( "venom_weaken" );
-static const efftype_id effect_visuals( "visuals" );
 
 static const fault_id fault_bionic_salvaged( "fault_bionic_salvaged" );
 
 static const itype_id itype_anesthetic( "anesthetic" );
-static const itype_id itype_battery( "battery" );
+static const itype_id itype_burnt_out_bionic( "burnt_out_bionic" );
 static const itype_id itype_radiocontrol( "radiocontrol" );
 static const itype_id itype_remotevehcontrol( "remotevehcontrol" );
 static const itype_id itype_water_clean( "water_clean" );
 
 static const json_character_flag json_flag_BIONIC_GUN( "BIONIC_GUN" );
 static const json_character_flag json_flag_BIONIC_NPC_USABLE( "BIONIC_NPC_USABLE" );
+static const json_character_flag json_flag_BIONIC_POWER_SOURCE( "BIONIC_POWER_SOURCE" );
 static const json_character_flag json_flag_BIONIC_TOGGLED( "BIONIC_TOGGLED" );
 static const json_character_flag json_flag_BIONIC_WEAPON( "BIONIC_WEAPON" );
 static const json_character_flag json_flag_ENHANCED_VISION( "ENHANCED_VISION" );
+static const json_character_flag json_flag_MANUAL_CBM_INSTALLATION( "MANUAL_CBM_INSTALLATION" );
+static const json_character_flag json_flag_PAIN_IMMUNE( "PAIN_IMMUNE" );
 
-static const material_id fuel_type_battery( "battery" );
 static const material_id fuel_type_metabolism( "metabolism" );
-static const material_id fuel_type_muscle( "muscle" );
 static const material_id fuel_type_sun_light( "sunlight" );
 static const material_id fuel_type_wind( "wind" );
 static const material_id material_budget_steel( "budget_steel" );
@@ -175,8 +160,13 @@ static const material_id material_hc_steel( "hc_steel" );
 static const material_id material_iron( "iron" );
 static const material_id material_lc_steel( "lc_steel" );
 static const material_id material_mc_steel( "mc_steel" );
+static const material_id material_muscle( "muscle" );
 static const material_id material_qt_steel( "qt_steel" );
 static const material_id material_steel( "steel" );
+
+static const morale_type morale_feeling_good( "morale_feeling_good" );
+static const morale_type morale_pyromania_nofire( "morale_pyromania_nofire" );
+static const morale_type morale_pyromania_startfire( "morale_pyromania_startfire" );
 
 static const requirement_id requirement_data_anesthetic( "anesthetic" );
 
@@ -187,28 +177,18 @@ static const skill_id skill_mechanics( "mechanics" );
 
 static const trait_id trait_CENOBITE( "CENOBITE" );
 static const trait_id trait_DEBUG_BIONICS( "DEBUG_BIONICS" );
-static const trait_id trait_MASOCHIST( "MASOCHIST" );
 static const trait_id trait_MASOCHIST_MED( "MASOCHIST_MED" );
 static const trait_id trait_NONE( "NONE" );
-static const trait_id trait_NOPAIN( "NOPAIN" );
 static const trait_id trait_PROF_AUTODOC( "PROF_AUTODOC" );
 static const trait_id trait_PROF_MED( "PROF_MED" );
+static const trait_id trait_PYROMANIA( "PYROMANIA" );
 static const trait_id trait_THRESH_MEDICAL( "THRESH_MEDICAL" );
 
-struct Character::auto_toggle_bionic_result {
-    bool can_burn_fuel = false;
-    bool has_burnable_fuel = false;
-    material_id burnable_fuel_id;
-    enum class fuel_type_t {
-        metabolism,
-        perpetual,
-        remote,
-        other
-    };
-    fuel_type_t fuel_type = fuel_type_t::other;
-    int fuel_energy = 0;
-    float effective_efficiency = 0.0f;
-    int current_fuel_stock = 0;
+struct Character::bionic_fuels {
+    std::vector<vehicle *> connected_vehicles;
+    std::vector<item *> connected_solar;
+    std::vector<item *> connected_fuel;
+    bool can_be_on = true;
 };
 
 namespace
@@ -239,11 +219,13 @@ void bionic::initialize_pseudo_items( bool create_weapon )
             }
         }
     }
-
+    //integrated armor uses pseudo item structure to be convenient but these should be visible in inventory
     for( const itype_id &id : bid.passive_pseudo_items ) {
         if( !id.is_empty() && id.is_valid() ) {
             item pseudo( id );
-            pseudo.set_flag( flag_PSEUDO );
+            if( !pseudo.has_flag( flag_INTEGRATED ) ) {
+                pseudo.set_flag( flag_PSEUDO );
+            }
             passive_pseudo_items.emplace_back( pseudo );
         }
     }
@@ -325,7 +307,7 @@ static social_modifiers load_bionic_social_mods( const JsonObject &jo )
     return ret;
 }
 
-void bionic_data::load( const JsonObject &jsobj, const std::string & )
+void bionic_data::load( const JsonObject &jsobj, const std::string_view src )
 {
 
     mandatory( jsobj, was_loaded, "id", id );
@@ -336,12 +318,11 @@ void bionic_data::load( const JsonObject &jsobj, const std::string & )
     // uses assign because optional doesn't handle loading units as strings
     assign( jsobj, "react_cost", power_over_time, false, 0_kJ );
     assign( jsobj, "capacity", capacity, false );
-    assign( jsobj, "weight_capacity_bonus", weight_capacity_bonus, false );
     assign( jsobj, "act_cost", power_activate, false, 0_kJ );
     assign( jsobj, "deact_cost", power_deactivate, false, 0_kJ );
     assign( jsobj, "trigger_cost", power_trigger, false, 0_kJ );
 
-    optional( jsobj, was_loaded, "time", charge_time, 0 );
+    optional( jsobj, was_loaded, "time", charge_time, 0_turns );
 
     optional( jsobj, was_loaded, "flags", flags );
     optional( jsobj, was_loaded, "active_flags", active_flags );
@@ -357,28 +338,27 @@ void bionic_data::load( const JsonObject &jsobj, const std::string & )
 
     optional( jsobj, was_loaded, "spell_on_activation", spell_on_activate );
 
-    optional( jsobj, was_loaded, "weight_capacity_modifier", weight_capacity_modifier, 1.0f );
     optional( jsobj, was_loaded, "exothermic_power_gen", exothermic_power_gen );
     optional( jsobj, was_loaded, "power_gen_emission", power_gen_emission );
     optional( jsobj, was_loaded, "coverage_power_gen_penalty", coverage_power_gen_penalty );
     optional( jsobj, was_loaded, "is_remote_fueled", is_remote_fueled );
 
+    optional( jsobj, was_loaded, "known_ma_styles", ma_styles );
     optional( jsobj, was_loaded, "learned_spells", learned_spells );
     optional( jsobj, was_loaded, "learned_proficiencies", proficiencies );
     optional( jsobj, was_loaded, "canceled_mutations", canceled_mutations );
     optional( jsobj, was_loaded, "mutation_conflicts", mutation_conflicts );
+    optional( jsobj, was_loaded, "give_mut_on_removal", give_mut_on_removal );
     optional( jsobj, was_loaded, "included_bionics", included_bionics );
     optional( jsobj, was_loaded, "included", included );
     optional( jsobj, was_loaded, "upgraded_bionic", upgraded_bionic );
+    optional( jsobj, was_loaded, "required_bionic", required_bionic );
     optional( jsobj, was_loaded, "fuel_options", fuel_opts );
-    optional( jsobj, was_loaded, "fuel_capacity", fuel_capacity );
     optional( jsobj, was_loaded, "activated_on_install", activated_on_install, false );
 
     optional( jsobj, was_loaded, "available_upgrades", available_upgrades );
 
     optional( jsobj, was_loaded, "installation_requirement", installation_requirement );
-
-    optional( jsobj, was_loaded, "vitamin_absorb_mod", vitamin_absorb_mod, 1.0f );
 
     optional( jsobj, was_loaded, "dupes_allowed", dupes_allowed, false );
 
@@ -389,31 +369,23 @@ void bionic_data::load( const JsonObject &jsobj, const std::string & )
     optional( jsobj, was_loaded, "deactivated_close_ui", deactivated_close_ui, false );
 
     for( JsonValue jv : jsobj.get_array( "activated_eocs" ) ) {
-        activated_eocs.push_back( effect_on_conditions::load_inline_eoc( jv, "" ) );
+        activated_eocs.push_back( effect_on_conditions::load_inline_eoc( jv, src ) );
     }
 
     for( JsonValue jv : jsobj.get_array( "processed_eocs" ) ) {
-        processed_eocs.push_back( effect_on_conditions::load_inline_eoc( jv, "" ) );
+        processed_eocs.push_back( effect_on_conditions::load_inline_eoc( jv, src ) );
     }
 
     for( JsonValue jv : jsobj.get_array( "deactivated_eocs" ) ) {
-        deactivated_eocs.push_back( effect_on_conditions::load_inline_eoc( jv, "" ) );
+        deactivated_eocs.push_back( effect_on_conditions::load_inline_eoc( jv, src ) );
     }
 
     int enchant_num = 0;
     for( JsonValue jv : jsobj.get_array( "enchantments" ) ) {
         std::string enchant_name = "INLINE_ENCH_" + name + "_" + std::to_string( enchant_num++ );
-        enchantments.push_back( enchantment::load_inline_enchantment( jv, "", enchant_name ) );
+        enchantments.push_back( enchantment::load_inline_enchantment( jv, src, enchant_name ) );
     }
 
-    if( jsobj.has_array( "stat_bonus" ) ) {
-        // clear data first so that copy-from can override it
-        stat_bonus.clear();
-        for( JsonArray ja : jsobj.get_array( "stat_bonus" ) ) {
-            stat_bonus.emplace( io::string_to_enum<character_stat>( ja.get_string( 0 ) ),
-                                ja.get_int( 1 ) );
-        }
-    }
     if( jsobj.has_array( "encumbrance" ) ) {
         // clear data first so that copy-from can override it
         encumbrance.clear();
@@ -437,28 +409,11 @@ void bionic_data::load( const JsonObject &jsobj, const std::string & )
             env_protec.emplace( bodypart_str_id( ja.get_string( 0 ) ), ja.get_int( 1 ) );
         }
     }
-    if( jsobj.has_array( "bash_protec" ) ) {
-        // clear data first so that copy-from can override it
-        bash_protec.clear();
-        for( JsonArray ja : jsobj.get_array( "bash_protec" ) ) {
-            bash_protec.emplace( bodypart_str_id( ja.get_string( 0 ) ),
-                                 ja.get_int( 1 ) );
-        }
-    }
-    if( jsobj.has_array( "cut_protec" ) ) {
-        // clear data first so that copy-from can override it
-        cut_protec.clear();
-        for( JsonArray ja : jsobj.get_array( "cut_protec" ) ) {
-            cut_protec.emplace( bodypart_str_id( ja.get_string( 0 ) ),
-                                ja.get_int( 1 ) );
-        }
-    }
-    if( jsobj.has_array( "bullet_protec" ) ) {
-        // clear data first so that copy-from can override it
-        bullet_protec.clear();
-        for( JsonArray ja : jsobj.get_array( "bullet_protec" ) ) {
-            bullet_protec.emplace( bodypart_str_id( ja.get_string( 0 ) ),
-                                   ja.get_int( 1 ) );
+    if( jsobj.has_array( "protec" ) ) {
+        protec.clear();
+        for( JsonArray ja : jsobj.get_array( "protec" ) ) {
+            protec.emplace( bodypart_str_id( ja.get_string( 0 ) ),
+                            load_resistances_instance( ja.get_object( 1 ) ) );
         }
     }
     if( jsobj.has_object( "social_modifiers" ) ) {
@@ -467,17 +422,52 @@ void bionic_data::load( const JsonObject &jsobj, const std::string & )
     }
 
     activated = has_flag( STATIC( json_character_flag( json_flag_BIONIC_TOGGLED ) ) ) ||
+                has_flag( json_flag_BIONIC_GUN ) ||
                 power_activate > 0_kJ ||
-                charge_time > 0;
+                spell_on_activate ||
+                charge_time > 0_turns;
 
     if( has_flag( STATIC( json_character_flag( "BIONIC_FAULTY" ) ) ) ) {
         faulty_bionics.push_back( id );
+    }
+
+    if( has_flag( json_flag_BIONIC_GUN ) && power_activate != 0_kJ ) {
+        debugmsg( "Bionic %s attribute power_activate is ignored due to BIONIC_GUN flag.", id.c_str() );
+    }
+}
+
+void bionic_data::finalize()
+{
+    for( auto &p : protec ) {
+        finalize_damage_map( p.second.resist_vals );
     }
 }
 
 void bionic_data::load_bionic( const JsonObject &jo, const std::string &src )
 {
     bionic_factory.load( jo, src );
+}
+
+std::map<bionic_id, bionic_id> bionic_data::migrations;
+
+void bionic_data::load_bionic_migration( const JsonObject &jo, const std::string_view )
+{
+    const bionic_id from( jo.get_string( "from" ) );
+    const bionic_id to = jo.has_string( "to" )
+                         ? bionic_id( jo.get_string( "to" ) )
+                         : bionic_id::NULL_ID();
+    migrations.emplace( from, to );
+    // if delete bionics id before migration, cant migration
+    // if key showed once, and its null, delete previous null one
+    auto iter = migrations.find( from );
+    if( iter != migrations.end() && ( *iter ).second.is_null() ) {
+        migrations.erase( iter );
+    }
+}
+
+void bionic_data::finalize_bionic()
+{
+    bionic_factory.finalize();
 }
 
 const std::vector<bionic_data> &bionic_data::get_all()
@@ -525,11 +515,14 @@ void bionic_data::check_bionic_consistency()
                           bio.id.c_str(), pseudo.c_str() );
             }
         }
-
+        for( const trait_id &mid : bio.mutation_conflicts ) {
+            if( !mid.is_valid() ) {
+                debugmsg( "Bionic %s conflicts with undefined mutation %s", bio.id.c_str(), mid.c_str() );
+            }
+        }
         for( const trait_id &mid : bio.canceled_mutations ) {
             if( !mid.is_valid() ) {
-                debugmsg( "Bionic %s cancels undefined mutation %s",
-                          bio.id.c_str(), mid.c_str() );
+                debugmsg( "Bionic %s cancels undefined mutation %s", bio.id.c_str(), mid.c_str() );
             }
         }
         for( const enchantment_id &eid : bio.id->enchantments ) {
@@ -561,8 +554,23 @@ void bionic_data::check_bionic_consistency()
                           bio.id.c_str(), bio.upgraded_bionic.c_str() );
             }
         }
+        if( bio.required_bionic ) {
+            if( bio.required_bionic == bio.id ) {
+                debugmsg( "Bionic %s requires itself as a prerequisite for installation", bio.id.c_str() );
+            } else if( !bio.required_bionic.is_valid() ) {
+                debugmsg( "Bionic %s requires undefined bionic %s",
+                          bio.id.c_str(), bio.required_bionic.c_str() );
+            }
+        }
         if( !item::type_is_defined( bio.itype() ) && !bio.included ) {
             debugmsg( "Bionic %s has no defined item version", bio.id.c_str() );
+        }
+        for( const std::pair<const bodypart_str_id, resistances> &bprot : bio.protec ) {
+            for( const std::pair<const damage_type_id, float> &dt : bprot.second.resist_vals ) {
+                if( !dt.first.is_valid() ) {
+                    debugmsg( "Invalid protection type \"%s\" for bionic %s", dt.first.c_str(), bio.id.c_str() );
+                }
+            }
         }
     }
 }
@@ -572,32 +580,52 @@ bionic_data::bionic_data() : name( no_translation( "bad bionic" ) ),
 {
 }
 
-static void force_comedown( effect &eff )
-{
-    if( eff.is_null() || eff.get_effect_type() == nullptr || eff.get_duration() <= 1_turns ) {
-        return;
-    }
-
-    eff.set_duration( std::min( eff.get_duration(), eff.get_int_dur_factor() ) );
-}
-
-void npc::discharge_cbm_weapon()
+void npc::discharge_cbm_weapon( bool fired, bool stow_real_weapon )
 {
     if( !is_using_bionic_weapon() ) {
         return;
     }
 
-    cata::optional<bionic *> bio_opt = find_bionic_by_uid( get_weapon_bionic_uid() );
+    item *pseudo_gun = get_wielded_item().get_item();
+    if( pseudo_gun != nullptr ) {
+        if( fired ) {
+            mod_power_level( -pseudo_gun->get_gun_bionic_drain() );
+        }
+    } else {
+        debugmsg( "NPC tried to use a non-existent bionic gun with UID %d", weapon_bionic_uid );
+    }
+
+    set_wielded_item( real_weapon );
+    real_weapon = item();
+    weapon_bionic_uid = 0;
+
+    item *real_weapon_ptr = get_wielded_item().get_item();
+    if( stow_real_weapon && real_weapon_ptr != nullptr ) {
+        stow_item( *real_weapon_ptr );
+    }
+}
+
+void npc::deactivate_or_discharge_bionic_weapon( bool stow_real_weapon )
+{
+    if( !is_using_bionic_weapon() ) {
+        return;
+    }
+
+    std::optional<bionic *> bio_opt = find_bionic_by_uid( get_weapon_bionic_uid() );
     if( !bio_opt ) {
         debugmsg( "NPC tried to use a non-existent gun bionic with UID %d", weapon_bionic_uid );
         return;
     }
+
     bionic &bio = **bio_opt;
 
-    mod_power_level( -bio.info().power_activate );
-
-    set_wielded_item( real_weapon );
-    weapon_bionic_uid = 0;
+    if( bio.powered ) {
+        deactivate_bionic( bio );
+    } else {
+        if( bio.info().has_flag( json_flag_BIONIC_GUN ) ) {
+            discharge_cbm_weapon( false, stow_real_weapon );
+        }
+    }
 }
 
 void npc::check_or_use_weapon_cbm( const bionic_id &cbm_id )
@@ -626,7 +654,23 @@ void npc::check_or_use_weapon_cbm( const bionic_id &cbm_id )
     }
     bionic &bio = ( *my_bionics )[index];
 
-    item &weapon = get_wielded_item();
+    item_location weapon = get_wielded_item();
+    const item &weap = weapon ? *weapon : null_item_reference();
+
+    int ammo_count = weap.ammo_remaining( this );
+    const units::energy ups_drain = weap.get_gun_ups_drain();
+    if( ups_drain > 0_kJ ) {
+        ammo_count = units::from_kilojoule( static_cast<std::int64_t>( ammo_count ) ) / ups_drain;
+    }
+
+    // the weapon value from `weapon_value` may be different from `npc_attack_rating`
+    // to avoid NPC infinitely switch weapon,
+    // only use bionic weapon when the ammo of wielded gun has been used up
+    bool ammo_used_up = !weap.is_gun() || ( ammo_count <= 0 && !can_reload_current() );
+    if( !ammo_used_up ) {
+        return;
+    }
+
     if( bio.info().has_flag( json_flag_BIONIC_GUN ) ) {
         if( !bio.has_weapon() ) {
             debugmsg( "NPC tried to activate gun bionic \"%s\" without fake_weapon",
@@ -641,22 +685,18 @@ void npc::check_or_use_weapon_cbm( const bionic_id &cbm_id )
             return;
         }
 
-        int ammo_count = weapon.ammo_remaining( this );
-        const int ups_drain = weapon.get_gun_ups_drain();
-        if( ups_drain > 0 ) {
-            ammo_count = ammo_count / ups_drain;
-        }
-        const int cbm_ammo = free_power /  bio.info().power_activate;
+        const int cbm_ammo = free_power / cbm_weapon.get_gun_energy_drain();
 
-        if( weapon_value( weapon, ammo_count ) < weapon_value( cbm_weapon, cbm_ammo ) ) {
+        if( weapon_value( weap, ammo_count ) < weapon_value( cbm_weapon, cbm_ammo ) ) {
             if( real_weapon.is_null() ) {
                 // Prevent replacing real weapon when migrating saves
-                real_weapon = weapon;
+                real_weapon = weap;
             }
             set_wielded_item( cbm_weapon );
             weapon_bionic_uid = bio.get_uid();
         }
-    } else if( bio.info().has_flag( json_flag_BIONIC_WEAPON ) && !weapon.has_flag( flag_NO_UNWIELD ) &&
+
+    } else if( bio.info().has_flag( json_flag_BIONIC_WEAPON ) && !weap.has_flag( flag_NO_UNWIELD ) &&
                free_power > bio.info().power_activate ) {
 
         if( !bio.has_weapon() ) {
@@ -665,16 +705,20 @@ void npc::check_or_use_weapon_cbm( const bionic_id &cbm_id )
             return;
         }
 
-        if( is_armed() ) {
-            stow_item( weapon );
-        }
-        add_msg_if_player_sees( pos(), m_info, _( "%s activates their %s." ),
-                                disp_name(), bio.info().name );
+        const item cbm_weapon = bio.get_weapon();
 
-        set_wielded_item( bio.get_weapon() );
-        mod_power_level( -bio.info().power_activate );
-        bio.powered = true;
-        weapon_bionic_uid = bio.get_uid();
+        if( weapon_value( weap, ammo_count ) < weapon_value( cbm_weapon, 0 ) ) {
+            if( is_armed() ) {
+                stow_item( *weapon );
+            }
+            add_msg_if_player_sees( pos_bub(), m_info, _( "%s activates their %s." ),
+                                    disp_name(), bio.info().name );
+
+            set_wielded_item( cbm_weapon );
+            mod_power_level( -bio.info().power_activate );
+            bio.powered = true;
+            weapon_bionic_uid = bio.get_uid();
+        }
     }
 }
 
@@ -685,8 +729,6 @@ void npc::check_or_use_weapon_cbm( const bionic_id &cbm_id )
 // share functions....
 bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics_ui )
 {
-    item &weapon = get_wielded_item();
-
     const bool mounted = is_mounted();
     if( bio.incapacitated_time > 0_turns ) {
         add_msg( m_info, _( "Your %s is shorting out and can't be activated." ),
@@ -706,8 +748,8 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
             return false;
         }
 
-        const auto_toggle_bionic_result result = auto_toggle_bionic( bio, true );
-        if( result.can_burn_fuel && !result.has_burnable_fuel ) {
+        const bionic_fuels result = bionic_fuel_check( bio, true );
+        if( !result.can_be_on ) {
             return false;
         }
 
@@ -719,9 +761,9 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
         // We can actually activate now, do activation-y things
         mod_power_level( -bio.info().power_activate );
 
-        bio.powered = bio.info().has_flag( json_flag_BIONIC_TOGGLED ) || bio.info().charge_time > 0;
+        bio.powered = bio.info().has_flag( json_flag_BIONIC_TOGGLED ) || bio.info().charge_time > 0_turns;
 
-        if( bio.info().charge_time > 0 ) {
+        if( bio.info().charge_time > 0_turns ) {
             bio.charge_timer = bio.info().charge_time;
         }
         if( !bio.id->enchantments.empty() ) {
@@ -740,14 +782,14 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
         }
     };
 
-    if( !bio.id->activated_eocs.empty() ) {
-        for( const effect_on_condition_id &eoc : bio.id->activated_eocs ) {
-            dialogue d( get_talker_for( *this ), nullptr );
-            if( eoc->type == eoc_type::ACTIVATION ) {
-                eoc->activate( d );
-            } else {
-                debugmsg( "Must use an activation eoc for a bionic activation.  If you don't want the effect_on_condition to happen on its own (without the bionic being activated), remove the recurrence min and max.  Otherwise, create a non-recurring effect_on_condition for this bionic with its condition and effects, then have a recurring one queue it." );
-            }
+    for( const effect_on_condition_id &eoc : bio.id->activated_eocs ) {
+        dialogue d( get_talker_for( *this ), nullptr );
+        write_var_value( var_type::context, "act_cost", &d,
+                         units::to_millijoule( bio.info().power_activate ) );
+        if( eoc->type == eoc_type::ACTIVATION ) {
+            eoc->activate( d );
+        } else {
+            debugmsg( "Must use an activation eoc for a bionic activation.  If you don't want the effect_on_condition to happen on its own (without the bionic being activated), remove the recurrence min and max.  Otherwise, create a non-recurring effect_on_condition for this bionic with its condition and effects, then have a recurring one queue it." );
         }
     }
 
@@ -761,14 +803,17 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
                       bio.info().id.str() );
             return false;
         }
+        if( bio.get_weapon().get_gun_bionic_drain() > get_power_level() ) {
+            add_msg_if_player( m_info, _( "You need at least %s of bionic power to fire the %s!" ),
+                               units::display( bio.get_weapon().get_gun_bionic_drain() ), bio.get_weapon().tname() );
+            return false;
+        }
 
         add_msg_activate();
-        refund_power(); // Power usage calculated later, in avatar_action::fire
         if( close_bionics_ui ) {
             *close_bionics_ui = true;
         }
-        avatar_action::fire_ranged_bionic( player_character, bio.get_weapon(),
-                                           bio.info().power_activate );
+        avatar_action::fire_ranged_bionic( player_character, bio.get_weapon() );
     } else if( bio.info().has_flag( json_flag_BIONIC_WEAPON ) ) {
         if( !bio.has_weapon() ) {
             debugmsg( "tried to activate weapon bionic \"%s\" without fake_weapon",
@@ -780,7 +825,7 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
 
         if( weapon.has_flag( flag_NO_UNWIELD ) ) {
             if( get_weapon_bionic_uid() ) {
-                if( cata::optional<bionic *> bio_opt = find_bionic_by_uid( get_weapon_bionic_uid() ) ) {
+                if( std::optional<bionic *> bio_opt = find_bionic_by_uid( get_weapon_bionic_uid() ) ) {
                     if( deactivate_bionic( **bio_opt, eff_only ) ) {
                         // restore state and try again
                         refund_power();
@@ -816,13 +861,20 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
         add_msg_activate();
 
         set_wielded_item( bio.get_weapon() );
-        get_wielded_item().invlet = '#';
+        get_wielded_item()->invlet = '#';
         weapon_bionic_uid = bio.get_uid();
     } else if( bio.id == bio_evap ) {
+        if( player_character.is_underwater() ) {
+            add_msg_if_player( m_info,
+                               _( "There's a lot of water around you already, no need to use your %s." ), bio.info().name );
+            bio.powered = false;
+            return false;
+        }
+
         add_msg_activate();
         const w_point weatherPoint = *get_weather().weather_precise;
         int humidity = get_local_humidity( weatherPoint.humidity, get_weather().weather_id,
-                                           g->is_sheltered( player_character.pos() ) );
+                                           g->is_sheltered( player_character.pos_bub() ) );
         // thirst units = 5 mL
         int water_available = std::lround( humidity * 3.0 / 100.0 );
         if( water_available == 0 ) {
@@ -846,9 +898,9 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
     } else if( bio.id == bio_resonator ) {
         add_msg_activate();
         //~Sound of a bionic sonic-resonator shaking the area
-        sounds::sound( pos(), 30, sounds::sound_t::combat, _( "VRRRRMP!" ), false, "bionic",
+        sounds::sound( pos_bub(), 30, sounds::sound_t::combat, _( "VRRRRMP!" ), false, "bionic",
                        static_cast<std::string>( bio_resonator ) );
-        for( const tripoint &bashpoint : here.points_in_radius( pos(), 1 ) ) {
+        for( const tripoint_bub_ms &bashpoint : here.points_in_radius( pos_bub(), 1 ) ) {
             here.bash( bashpoint, 110 );
             // Multibash effect, so that doors &c will fall
             here.bash( bashpoint, 110 );
@@ -856,28 +908,6 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
         }
 
         mod_moves( -100 );
-    } else if( bio.id == bio_time_freeze ) {
-        if( mounted ) {
-            refund_power();
-            add_msg_if_player( m_info, _( "You cannot activate %s while mounted." ), bio.info().name );
-            return false;
-        }
-        add_msg_activate();
-
-        mod_moves( units::to_kilojoule( get_power_level() ) );
-        set_power_level( 0_kJ );
-        add_msg_if_player( m_good, _( "Your speed suddenly increases!" ) );
-        if( one_in( 3 ) ) {
-            add_msg_if_player( m_bad, _( "Your muscles tear with the strain." ) );
-            apply_damage( nullptr, bodypart_id( "arm_l" ), rng( 5, 10 ) );
-            apply_damage( nullptr, bodypart_id( "arm_r" ), rng( 5, 10 ) );
-            apply_damage( nullptr, bodypart_id( "leg_l" ), rng( 7, 12 ) );
-            apply_damage( nullptr, bodypart_id( "leg_r" ), rng( 7, 12 ) );
-            apply_damage( nullptr, bodypart_id( "torso" ), rng( 5, 15 ) );
-        }
-        if( one_in( 5 ) ) {
-            add_effect( effect_teleglow, rng( 5_minutes, 40_minutes ) );
-        }
     } else if( bio.id == bio_teleport ) {
         if( mounted ) {
             refund_power();
@@ -891,29 +921,6 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
     } else if( bio.id == bio_blood_anal ) {
         add_msg_activate();
         conduct_blood_analysis();
-    } else if( bio.id == bio_blood_filter ) {
-        add_msg_activate();
-        static const std::vector<efftype_id> removable = {{
-                effect_fungus, effect_dermatik, effect_bloodworms,
-                effect_tetanus, effect_poison, effect_badpoison, effect_stung,
-                effect_pkill1, effect_pkill2, effect_pkill3, effect_pkill_l,
-                effect_drunk, effect_cig, effect_high, effect_hallu, effect_visuals,
-                effect_pblue, effect_iodine, effect_datura,
-                effect_took_xanax, effect_took_prozac, effect_took_prozac_bad,
-                effect_took_flumed, effect_antifungal, effect_venom_weaken,
-                effect_venom_dmg, effect_paralyzepoison
-            }
-        };
-
-        for( const string_id<effect_type> &eff : removable ) {
-            remove_effect( eff );
-        }
-        // Purging the substance won't remove the fatigue it caused
-        force_comedown( get_effect( effect_adrenaline ) );
-        force_comedown( get_effect( effect_meth ) );
-        set_painkiller( 0 );
-        set_stim( 0 );
-        mod_moves( -100 );
     } else if( bio.id == bio_torsionratchet ) {
         add_msg_activate();
         add_msg_if_player( m_info, _( "Your torsion ratchet locks onto your joints." ) );
@@ -921,10 +928,15 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
         add_msg_activate();
         add_msg_if_player( m_info, _( "You can now run faster, assisted by joint servomotors." ) );
     } else if( bio.id == bio_lighter ) {
-        const cata::optional<tripoint> pnt = choose_adjacent( _( "Start a fire where?" ) );
-        if( pnt && here.is_flammable( *pnt ) ) {
+        const std::optional<tripoint_bub_ms> pnt = choose_adjacent( _( "Start a fire where?" ) );
+        if( pnt && here.is_flammable( *pnt ) && !here.get_field( *pnt, fd_fire ) ) {
             add_msg_activate();
             here.add_field( *pnt, fd_fire, 1 );
+            if( has_trait( trait_PYROMANIA ) ) {
+                add_morale( morale_pyromania_startfire, 5, 10, 3_hours, 2_hours );
+                rem_morale( morale_pyromania_nofire );
+                add_msg_if_player( m_good, _( "You happily light a fire." ) );
+            }
             mod_moves( -100 );
         } else {
             refund_power();
@@ -941,18 +953,9 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
         } else {
             set_rad( 0 );
         }
-    } else if( bio.id == bio_adrenaline ) {
-        add_msg_activate();
-        if( has_effect( effect_adrenaline ) ) {
-            add_msg_if_player( m_bad, _( "Safeguards kick in, and the bionic refuses to activate!" ) );
-            refund_power();
-            return false;
-        } else {
-            add_msg_activate();
-            add_effect( effect_adrenaline, 20_minutes );
-        }
     } else if( bio.id == bio_emp ) {
-        if( const cata::optional<tripoint> pnt = choose_adjacent( _( "Create an EMP where?" ) ) ) {
+        if( const std::optional<tripoint_bub_ms> pnt = choose_adjacent(
+                    _( "Create an EMP where?" ) ) ) {
             add_msg_activate();
             explosion_handler::emp_blast( *pnt );
             mod_moves( -100 );
@@ -960,16 +963,10 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
             refund_power();
             return false;
         }
-    } else if( bio.id == bio_hydraulics ) {
-        add_msg_activate();
-        add_msg_if_player( m_good, _( "Your muscles hiss as hydraulic strength fills them!" ) );
-        //~ Sound of hissing hydraulic muscle! (not quite as loud as a car horn)
-        sounds::sound( pos(), 19, sounds::sound_t::activity, _( "HISISSS!" ), false, "bionic",
-                       static_cast<std::string>( bio_hydraulics ) );
     } else if( bio.id == bio_water_extractor ) {
         bool no_target = true;
         bool extracted = false;
-        for( item &it : here.i_at( pos() ) ) {
+        for( item &it : here.i_at( pos_bub() ) ) {
             static const units::volume volume_per_water_charge = 500_ml;
             if( it.is_corpse() ) {
                 const int avail = it.get_var( "remaining_water", it.volume() / volume_per_water_charge );
@@ -978,7 +975,7 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
                     if( query_yn( _( "Extract water from the %s" ),
                                   colorize( it.tname(), it.color_in_inventory() ) ) ) {
                         item water( itype_water_clean, calendar::turn, avail );
-                        water.set_item_temperature( 0.00001 * it.temperature );
+                        water.set_item_temperature( it.temperature );
                         if( liquid_handler::consume_liquid( water ) ) {
                             add_msg_activate();
                             extracted = true;
@@ -1002,10 +999,10 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
         { material_iron, material_steel, material_lc_steel, material_mc_steel, material_hc_steel, material_ch_steel, material_qt_steel, material_budget_steel };
         // Remember all items that will be affected, then affect them
         // Don't "snowball" by affecting some items multiple times
-        std::vector<std::pair<item, tripoint>> affected;
+        std::vector<std::pair<item, tripoint_bub_ms>> affected;
         const units::mass weight_cap = weight_capacity();
-        for( const tripoint &p : here.points_in_radius( pos(), 10 ) ) {
-            if( p == pos() || !here.has_items( p ) || here.has_flag( ter_furn_flag::TFLAG_SEALED, p ) ) {
+        for( const tripoint_bub_ms &p : here.points_in_radius( pos_bub(), 10 ) ) {
+            if( p == pos_bub() || !here.has_items( p ) || here.has_flag( ter_furn_flag::TFLAG_SEALED, p ) ) {
                 continue;
             }
 
@@ -1013,23 +1010,25 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
             for( auto it = stack.begin(); it != stack.end(); it++ ) {
                 if( it->weight() < weight_cap &&
                     it->made_of_any( affected_materials ) ) {
-                    affected.emplace_back( std::make_pair( *it, p ) );
+                    affected.emplace_back( *it, p );
                     stack.erase( it );
                     break;
                 }
             }
         }
 
-        for( const std::pair<item, tripoint> &pr : affected ) {
+        for( const std::pair<item, tripoint_bub_ms> &pr : affected ) {
             projectile proj;
             proj.speed  = 50;
-            proj.impact = damage_instance::physical( pr.first.weight() / 250_gram, 0, 0, 0 );
+            proj.impact = damage_instance();
+            // FIXME: Hardcoded damage type
+            proj.impact.add_damage( STATIC( damage_type_id( "bash" ) ), pr.first.weight() / 250_gram );
             // make the projectile stop one tile short to prevent hitting the player
-            proj.range = rl_dist( pr.second, pos() ) - 1;
-            proj.proj_effects = {{ "NO_ITEM_DAMAGE", "DRAW_AS_LINE", "NO_DAMAGE_SCALING", "JET" }};
+            proj.range = rl_dist( pr.second, pos_bub() ) - 1;
+            proj.proj_effects = {{ ammo_effect_NO_ITEM_DAMAGE, ammo_effect_DRAW_AS_LINE, ammo_effect_NO_DAMAGE_SCALING, ammo_effect_JET }};
 
-            dealt_projectile_attack dealt = projectile_attack(
-                                                proj, pr.second, pos(), dispersion_sources{ 0 }, this );
+            dealt_projectile_attack dealt;
+            projectile_attack( dealt, proj, pr.second, pos_bub(), dispersion_sources{ 0 }, this );
             here.add_item_or_charges( dealt.end_point, pr.first );
         }
 
@@ -1038,11 +1037,11 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
         if( !is_avatar() ) {
             return false;
         }
-        cata::optional<tripoint> target = lockpick_activity_actor::select_location( player_character );
+        std::optional<tripoint_bub_ms> target = lockpick_activity_actor::select_location(
+                player_character );
         if( target.has_value() ) {
             add_msg_activate();
-            assign_activity(
-                player_activity( lockpick_activity_actor::use_bionic( here.getabs( *target ) ) ) );
+            assign_activity( lockpick_activity_actor::use_bionic( here.get_abs( *target ) ) );
             if( close_bionics_ui ) {
                 *close_bionics_ui = true;
             }
@@ -1052,43 +1051,41 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
         }
     } else if( bio.id == bio_flashbang ) {
         add_msg_activate();
-        explosion_handler::flashbang( pos(), true );
+        explosion_handler::flashbang( pos_bub(), true );
         mod_moves( -100 );
     } else if( bio.id == bio_shockwave ) {
         add_msg_activate();
-        explosion_handler::shockwave( pos(), 3, 4, 2, 8, true );
+        explosion_handler::shockwave( pos_bub(), 3, 4, 2, 8, true );
         add_msg_if_player( m_neutral, _( "You unleash a powerful shockwave!" ) );
         mod_moves( -100 );
     } else if( bio.id == bio_meteorologist ) {
         add_msg_activate();
         // Calculate local wind power
         int vehwindspeed = 0;
-        if( optional_vpart_position vp = here.veh_at( pos() ) ) {
+        if( optional_vpart_position vp = here.veh_at( pos_bub() ) ) {
             // vehicle velocity in mph
             vehwindspeed = std::abs( vp->vehicle().velocity / 100 );
         }
-        const oter_id &cur_om_ter = overmap_buffer.ter( global_omt_location() );
+        const oter_id &cur_om_ter = overmap_buffer.ter( pos_abs_omt() );
         /* cache g->get_temperature( player location ) since it is used twice. No reason to recalc */
         weather_manager &weather = get_weather();
-        const int player_local_temp = weather.get_temperature( player_character.pos() );
-        /* windpower defined in internal velocity units (=.01 mph) */
-        double windpower = 100.0f * get_local_windpower( weather.windspeed + vehwindspeed,
-                           cur_om_ter, pos(), weather.winddirection, g->is_sheltered( pos() ) );
+        const units::temperature player_local_temp = weather.get_temperature( player_character.pos_bub() );
+        const int windpower = get_local_windpower( weather.windspeed + vehwindspeed,
+                              cur_om_ter, pos_abs(), weather.winddirection, g->is_sheltered( pos_bub() ) );
         add_msg_if_player( m_info, _( "Temperature: %s." ), print_temperature( player_local_temp ) );
         const w_point weatherPoint = *weather.weather_precise;
         add_msg_if_player( m_info, _( "Relative Humidity: %s." ),
                            print_humidity(
                                get_local_humidity( weatherPoint.humidity, get_weather().weather_id,
-                                       g->is_sheltered( player_character.pos() ) ) ) );
+                                       g->is_sheltered( player_character.pos_bub() ) ) ) );
         add_msg_if_player( m_info, _( "Pressure: %s." ),
                            print_pressure( static_cast<int>( weatherPoint.pressure ) ) );
         add_msg_if_player( m_info, _( "Wind Speed: %.1f %s." ),
-                           convert_velocity( static_cast<int>( windpower ), VU_WIND ),
+                           convert_velocity( windpower * 100, VU_WIND ),
                            velocity_units( VU_WIND ) );
         add_msg_if_player( m_info, _( "Feels Like: %s." ),
-                           print_temperature(
-                               get_local_windchill( weatherPoint.temperature, weatherPoint.humidity,
-                                       windpower / 100 ) + player_local_temp ) );
+                           print_temperature( player_local_temp + get_local_windchill( weatherPoint.temperature,
+                                              weatherPoint.humidity,  windpower ) ) );
         std::string dirstring = get_dirstring( weather.winddirection );
         add_msg_if_player( m_info, _( "Wind Direction: From the %s." ), dirstring );
     } else if( bio.id == bio_remote ) {
@@ -1099,21 +1096,19 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
         if( choice >= 0 && choice <= 1 ) {
             item ctr;
             if( choice == 0 ) {
-                ctr = item( "remotevehcontrol", calendar::turn_zero );
+                ctr = item( itype_remotevehcontrol, calendar::turn_zero );
             } else {
-                ctr = item( "radiocontrol", calendar::turn_zero );
+                ctr = item( itype_radiocontrol, calendar::turn_zero );
             }
             ctr.charges = units::to_kilojoule( get_power_level() );
             int power_use = invoke_item( &ctr );
-            mod_power_level( units::from_kilojoule( -power_use ) );
+            mod_power_level( units::from_kilojoule( static_cast<std::int64_t>( -power_use ) ) );
             bio.powered = ctr.active;
         } else {
             bio.powered = g->remoteveh() != nullptr || !get_value( "remote_controlling" ).empty();
         }
     } else if( bio.info().is_remote_fueled ) {
-        std::vector<item *> cables = items_with( []( const item & it ) {
-            return it.has_flag( flag_CABLE_SPOOL );
-        } );
+        std::vector<item *> cables = cache_get_items_with( flag_CABLE_SPOOL );
         bool has_cable = !cables.empty();
         bool free_cable = false;
         bool success = false;
@@ -1121,46 +1116,42 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
             add_msg_if_player( m_info,
                                _( "You need a jumper cable connected to a power source to drain power from it." ) );
         } else {
-            for( item *cable : cables ) {
-                const std::string state = cable->get_var( "state" );
-                if( state == "cable_charger" ) {
-                    add_msg_if_player( m_info,
-                                       _( "Cable is plugged-in to the CBM but it has to be also connected to the power source." ) );
-                }
-                if( state == "cable_charger_link" ) {
-                    add_msg_activate();
-                    success = true;
-                    add_msg_if_player( m_info,
-                                       _( "You are plugged to the vehicle.  It will charge you if it has some juice in it." ) );
-                }
-                if( state == "solar_pack_link" ) {
-                    add_msg_activate();
-                    success = true;
-                    add_msg_if_player( m_info,
-                                       _( "You are plugged to a solar pack.  It will charge you if it's unfolded and in sunlight." ) );
-                }
-                if( state == "UPS_link" ) {
-                    add_msg_activate();
-                    success = true;
-                    add_msg_if_player( m_info,
-                                       _( "You are plugged to a UPS.  It will charge you if it has some juice in it." ) );
-                }
-                if( state == "solar_pack" || state == "UPS" ) {
-                    add_msg_if_player( m_info,
-                                       _( "You have a cable plugged to a portable power source, but you need to plug it in to the CBM." ) );
-                }
-                if( state == "pay_out_cable" ) {
-                    add_msg_if_player( m_info,
-                                       _( "You have a cable plugged to a vehicle, but you need to plug it in to the CBM." ) );
-                }
-                if( state == "attach_first" ) {
+            for( const item *cable : cables ) {
+                if( cable->has_no_links() ) {
                     free_cable = true;
+                } else if( cable->link_has_states( link_state::no_link, link_state::bio_cable ) ) {
+                    add_msg_if_player( m_info,
+                                       _( "You have a cable attached to your CBM but it also has to be connected to a power source." ) );
+                } else if( cable->link_has_states( link_state::solarpack, link_state::bio_cable ) ) {
+                    add_msg_activate();
+                    success = true;
+                    add_msg_if_player( m_info,
+                                       _( "You are attached to a solar pack.  It will charge you if it's unfolded and in sunlight." ) );
+                } else if( cable->link_has_states( link_state::ups, link_state::bio_cable ) ) {
+                    add_msg_activate();
+                    success = true;
+                    add_msg_if_player( m_info,
+                                       _( "You are attached to a UPS.  It will charge you if it has some juice in it." ) );
+                } else if( cable->link_has_states( link_state::bio_cable, link_state::vehicle_battery ) ||
+                           cable->link_has_states( link_state::bio_cable, link_state::vehicle_port ) ) {
+                    add_msg_activate();
+                    success = true;
+                    add_msg_if_player( m_info,
+                                       _( "You are attached to a vehicle.  It will charge you if it has some juice in it." ) );
+                } else if( cable->link_has_states( link_state::solarpack, link_state::automatic ) ||
+                           cable->link_has_states( link_state::ups, link_state::automatic ) ) {
+                    add_msg_if_player( m_info,
+                                       _( "You have a cable attached to a portable power source, but you also need to connect it to your CBM." ) );
+                } else if( cable->link_has_states( link_state::automatic, link_state::vehicle_battery ) ||
+                           cable->link_has_states( link_state::automatic, link_state::vehicle_port ) ) {
+                    add_msg_if_player( m_info,
+                                       _( "You have a cable attached to a vehicle, but you also need to connect it to your CBM." ) );
                 }
             }
 
-            if( free_cable ) {
+            if( free_cable && !success ) {
                 add_msg_if_player( m_info,
-                                   _( "You have at least one free cable in your inventory that you could use to plug yourself in." ) );
+                                   _( "You have at least one free cable in your inventory that you could use to connect yourself." ) );
             }
         }
         if( !success ) {
@@ -1173,22 +1164,19 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
 
         const std::vector<bionic_id> &deactivated_bionics = bio.info().autodeactivated_bionics;
         if( !deactivated_bionics.empty() ) {
-            for( bionic &bio : *my_bionics ) {
+            for( bionic &it : *my_bionics ) {
                 if( std::find( deactivated_bionics.begin(), deactivated_bionics.end(),
-                               bio.id ) != deactivated_bionics.end() ) {
-                    if( bio.powered ) {
-                        bio.powered = false;
-                        add_msg_if_player( m_info, _( "Your %s automatically turn off." ),
-                                           bio.info().name );
+                               it.id ) != deactivated_bionics.end() ) {
+                    if( it.powered ) {
+                        it.powered = false;
+                        add_msg_if_player( m_info, _( "Your %s automatically turn off." ), it.info().name );
                     }
                 }
             }
         }
     }
-
-    // Recalculate stats (strength, mods from pain etc.) that could have been affected
+    bio_flag_cache.clear();
     calc_encumbrance();
-    reset();
 
     // Also reset crafting inventory cache if this bionic spawned a fake item
     if( bio.has_weapon() || !bio.info().passive_pseudo_items.empty() ||
@@ -1200,47 +1188,43 @@ bool Character::activate_bionic( bionic &bio, bool eff_only, bool *close_bionics
     return true;
 }
 
-ret_val<bool> Character::can_deactivate_bionic( bionic &bio, bool eff_only ) const
+ret_val<void> Character::can_deactivate_bionic( bionic &bio, bool eff_only ) const
 {
 
     if( bio.incapacitated_time > 0_turns ) {
-        return ret_val<bool>::make_failure( _( "Your %s is shorting out and can't be deactivated." ),
+        return ret_val<void>::make_failure( _( "Your %s is shorting out and can't be deactivated." ),
                                             bio.info().name );
     }
 
     if( !eff_only ) {
         if( !bio.powered ) {
             // It's already off!
-            return ret_val<bool>::make_failure();
+            return ret_val<void>::make_failure();
         }
         if( !bio.info().has_flag( json_flag_BIONIC_TOGGLED ) ) {
             // It's a fire-and-forget bionic, we can't turn it off but have to wait for
             //it to run out of charge
-            return ret_val<bool>::make_failure( _( "You can't deactivate your %s manually!" ),
+            return ret_val<void>::make_failure( _( "You can't deactivate your %s manually!" ),
                                                 bio.info().name );
         }
         if( get_power_level() < bio.info().power_deactivate ) {
-            return ret_val<bool>::make_failure( _( "You don't have the power to deactivate your %s." ),
+            return ret_val<void>::make_failure( _( "You don't have the power to deactivate your %s." ),
                                                 bio.info().name );
         }
     }
 
-    return ret_val<bool>::make_success();
+    return ret_val<void>::make_success();
 }
 
 bool Character::deactivate_bionic( bionic &bio, bool eff_only )
 {
     const auto can_deactivate = can_deactivate_bionic( bio, eff_only );
-
+    bio_flag_cache.clear();
     if( !can_deactivate.success() ) {
         if( !can_deactivate.str().empty() ) {
             add_msg( m_info,  can_deactivate.str() );
         }
         return false;
-    }
-
-    if( bio.info().is_remote_fueled ) {
-        reset_remote_fuel();
     }
 
     // Just do the effect, no stat changing or messages
@@ -1250,33 +1234,32 @@ bool Character::deactivate_bionic( bionic &bio, bool eff_only )
         bio.powered = false;
         add_msg_if_player( m_neutral, _( "You deactivate your %s." ), bio.info().name );
     }
-    const item &w_weapon = get_wielded_item();
+
     // Deactivation effects go here
 
-    if( !bio.id->deactivated_eocs.empty() ) {
-        for( const effect_on_condition_id &eoc : bio.id->deactivated_eocs ) {
-            dialogue d( get_talker_for( *this ), nullptr );
-            if( eoc->type == eoc_type::ACTIVATION ) {
-                eoc->activate( d );
-            } else {
-                debugmsg( "Must use an activation eoc for a bionic deactivation.  If you don't want the effect_on_condition to happen on its own (without the bionic being activated), remove the recurrence min and max.  Otherwise, create a non-recurring effect_on_condition for this bionic with its condition and effects, then have a recurring one queue it." );
-            }
+    for( const effect_on_condition_id &eoc : bio.id->deactivated_eocs ) {
+        dialogue d( get_talker_for( *this ), nullptr );
+        if( eoc->type == eoc_type::ACTIVATION ) {
+            eoc->activate( d );
+        } else {
+            debugmsg( "Must use an activation eoc for a bionic deactivation.  If you don't want the effect_on_condition to happen on its own (without the bionic being activated), remove the recurrence min and max.  Otherwise, create a non-recurring effect_on_condition for this bionic with its condition and effects, then have a recurring one queue it." );
         }
     }
 
     if( bio.info().has_flag( json_flag_BIONIC_WEAPON ) ) {
         if( bio.get_uid() == get_weapon_bionic_uid() ) {
-            bio.set_weapon( get_wielded_item() );
-            add_msg_if_player( _( "You withdraw your %s." ), w_weapon.tname() );
-            if( get_player_view().sees( pos() ) ) {
+            bio.set_weapon( *get_wielded_item() );
+            add_msg_if_player( _( "You withdraw your %s." ), weapon.tname() );
+            if( get_player_view().sees( pos_bub() ) ) {
                 if( male ) {
-                    add_msg_if_npc( m_info, _( "<npcname> withdraws his %s." ), w_weapon.tname() );
+                    add_msg_if_npc( m_info, _( "<npcname> withdraws his %s." ), weapon.tname() );
                 } else {
-                    add_msg_if_npc( m_info, _( "<npcname> withdraws her %s." ), w_weapon.tname() );
+                    add_msg_if_npc( m_info, _( "<npcname> withdraws her %s." ), weapon.tname() );
                 }
             }
             set_wielded_item( item() );
             weapon_bionic_uid = 0;
+            cached_info.erase( "weapon_value" );
         }
     } else if( bio.id == bio_cqb ) {
         martial_arts_data->selected_style_check();
@@ -1289,9 +1272,7 @@ bool Character::deactivate_bionic( bionic &bio, bool eff_only )
         }
     }
 
-    // Recalculate stats (strength, mods from pain etc.) that could have been affected
     calc_encumbrance();
-    reset();
     if( !bio.id->enchantments.empty() ) {
         recalculate_enchantment_cache();
     }
@@ -1306,400 +1287,237 @@ bool Character::deactivate_bionic( bionic &bio, bool eff_only )
     return true;
 }
 
-Character::auto_toggle_bionic_result Character::auto_toggle_bionic( bionic &bio, const bool start )
+Character::bionic_fuels Character::bionic_fuel_check( bionic &bio,
+        const bool start )
 {
-    auto_toggle_bionic_result result;
-
-    if( bio.info().fuel_opts.empty() && !bio.info().is_remote_fueled ) {
-        return result;
-    }
-    result.can_burn_fuel = true;
-    std::vector<material_id> fuel_available = get_fuel_available( bio.id );
+    bionic_fuels result;
 
     const bool is_remote_fueled = bio.info().is_remote_fueled;
-    material_id remote_fuel;
+
+    if( bio.id->fuel_opts.empty() && !is_remote_fueled ) {
+        return result;
+    }
+
     if( is_remote_fueled ) {
-        remote_fuel = find_remote_fuel();
-        if( !remote_fuel.is_empty() ) {
-            fuel_available.emplace_back( remote_fuel );
-        }
-    }
-
-    bool toggle_off = false;
-    bool keep_off = false;
-    if( fuel_available.empty() ) {
-        if( bio.powered || start ) {
-            if( start ) {
-                add_msg_player_or_npc( m_bad, _( "Your %s does not have enough fuel to start." ),
-                                       _( "<npcname>'s %s does not have enough fuel to start." ),
-                                       bio.info().name );
-                if( bio.powered ) {
-                    deactivate_bionic( bio );
-                }
-            } else {
-                add_msg_player_or_npc( m_info,
-                                       _( "Your %s runs out of fuel and turns off." ),
-                                       _( "<npcname>'s %s runs out of fuel and turns off." ),
-                                       bio.info().name );
-                if( bio.powered ) {
-                    bio.powered = false;
-                    deactivate_bionic( bio, true );
-                }
-            }
-            toggle_off = true;
-        } else {
-            keep_off = true;
-        }
+        result.connected_vehicles = get_cable_vehicle();
+        result.connected_solar = get_cable_solar();
+        result.connected_fuel = get_cable_ups();
     } else {
-        std::string msg_player;
-        std::string msg_npc;
-        for( const material_id &fuel : fuel_available ) {
-            const int fuel_energy = fuel->get_fuel_data().energy;
-            const bool is_metabolism_powered = fuel == fuel_type_metabolism;
-            const bool is_perpetual_fuel = fuel->get_fuel_data().is_perpetual_fuel;
-            const bool is_remote_fuel = is_remote_fueled && fuel == remote_fuel;
-            float effective_efficiency = get_effective_efficiency( bio, bio.info().fuel_efficiency );
-            if( is_remote_fuel && fuel == fuel_type_sun_light ) {
-                effective_efficiency *= item_worn_with_flag( flag_SOLARPACK_ON ).type->solar_efficiency;
-            }
-            int current_fuel_stock = 0;
-            if( is_metabolism_powered ) {
-                current_fuel_stock = std::max( 0.0f, get_stored_kcal() - 0.8f *
-                                               get_healthy_kcal() );
-            } else if( is_perpetual_fuel ) {
-                current_fuel_stock = 1;
-            } else if( is_remote_fuel ) {
-                current_fuel_stock = std::stoi( get_value( "rem_" + fuel.str() ) );
-                if( current_fuel_stock <= 0 ) {
-                    remove_value( "rem_" + fuel.str() );
-                }
-            } else {
-                current_fuel_stock = std::stoi( get_value( fuel.str() ) );
-                if( current_fuel_stock <= 0 ) {
-                    remove_value( fuel.str() );
-                }
-            }
-
-            if( result.has_burnable_fuel ) {
-                // if we already found a burnable fuel we can skip the following
-                // code which only generates fuel-not-found messages and assigns
-                // found fuel to the result. code before this has side-effects
-                // so cannot be skipped.
-                continue;
-            }
-
-            if( bio.get_safe_fuel_thresh() > 0
-                && get_power_level() + units::from_kilojoule( fuel_energy ) * effective_efficiency >
-                get_max_power_level() * std::min( 1.0f, bio.get_safe_fuel_thresh() ) ) {
-                if( bio.powered || start ) {
-                    if( !start ) {
-                        if( is_metabolism_powered ) {
-                            msg_player = _( "Your %s turns off to not waste calories." );
-                            msg_npc = _( "<npcname>'s %s turns off to not waste calories." );
-                        } else if( is_perpetual_fuel ) {
-                            msg_player = _( "Your %s turns off after filling your power banks." );
-                            msg_npc = _( "<npcname>'s %s turns off after filling their power banks." );
-                        } else {
-                            msg_player = _( "Your %s turns off to not waste fuel." );
-                            msg_npc = _( "<npcname>'s %s turns off to not waste fuel." );
-                        }
-                    } else if( get_max_power_level() == 0_mJ ) {
-                        msg_player = _( "Your %s cannot be started because you don't have any bionic power storage." );
-                        msg_npc = _( "<npcname>'s %s cannot be started because they don't have any bionic power storage." );
-                    } else if( get_power_level() != get_max_power_level() ) {
-                        msg_player = _( "Your %s cannot be started due to fuel saving." );
-                        msg_npc = _( "<npcname>'s %s cannot be started due to fuel saving." );
-                    } else {
-                        msg_player = _( "Your %s cannot be started because your power banks are full." );
-                        msg_npc = _( "<npcname>'s %s cannot be started because their power banks are full." );
-                    }
-                }
-            } else if( current_fuel_stock <= 0 ) {
-                if( bio.powered || start ) {
-                    if( !start ) {
-                        if( is_metabolism_powered ) {
-                            msg_player =
-                                _( "Stored calories are below the safe threshold, your %s shuts down to preserve your health." );
-                            msg_npc = _( "Stored calories are below the safe threshold, <npcname>'s %s shuts down to preserve their health." );
-                        } else {
-                            msg_player = _( "Your %s runs out of fuel and turns off." );
-                            msg_npc = _( "<npcname>'s %s runs out of fuel and turns off." );
-                        }
-                    } else {
-                        if( is_metabolism_powered ) {
-                            msg_player = _( "Your %s cannot be started because your calories are below safe levels." );
-                            msg_npc = _( "<npcname>'s %s cannot be started because their calories are below safe levels." );
-                        } else {
-                            msg_player = _( "Your %s doesn't have enough fuel to start." );
-                            msg_npc = _( "<npcname>'s %s doesn't have enough fuel to start." );
-                        }
-                    }
-                }
-            } else {
-                result.has_burnable_fuel = true;
-                result.burnable_fuel_id = fuel;
-                if( is_metabolism_powered ) {
-                    result.fuel_type = auto_toggle_bionic_result::fuel_type_t::metabolism;
-                } else if( is_perpetual_fuel ) {
-                    result.fuel_type = auto_toggle_bionic_result::fuel_type_t::perpetual;
-                } else if( is_remote_fuel ) {
-                    result.fuel_type = auto_toggle_bionic_result::fuel_type_t::remote;
-                } else {
-                    result.fuel_type = auto_toggle_bionic_result::fuel_type_t::other;
-                }
-                result.fuel_energy = fuel_energy;
-                result.effective_efficiency = effective_efficiency;
-                result.current_fuel_stock = current_fuel_stock;
-            }
-        }
-        if( !result.has_burnable_fuel ) {
-            if( bio.powered || start ) {
-                add_msg_player_or_npc( m_info, msg_player, msg_npc, bio.info().name );
-                if( bio.powered ) {
-                    bio.powered = false;
-                    deactivate_bionic( bio, true );
-                }
-                toggle_off = true;
-            } else {
-                keep_off = true;
-            }
-        }
+        result.connected_fuel = get_bionic_fuels( bio.id );
     }
 
-    if( !toggle_off && !bio.powered && !start && bio.is_auto_start_on() ) {
-        const float start_threshold = bio.get_auto_start_thresh();
-        if( get_power_level() <= start_threshold * get_max_power_level() ) {
-            if( !keep_off ) {
-                activate_bionic( bio );
-            } else if( calendar::once_every( 1_hours ) ) {
-                add_msg_player_or_npc( m_bad, _( "Your %s does not have enough fuel to use Auto Start." ),
-                                       _( "<npcname>'s %s does not have enough fuel to use Auto Start." ),
+    int other_charges = 0;
+    // There could be multiple fuels. But probably not. So we just check the first.
+    bool is_perpetual = !bio.id->fuel_opts.empty() &&
+                        bio.id->fuel_opts.front()->get_fuel_data().is_perpetual_fuel;
+    bool metabolism_powered = !bio.id->fuel_opts.empty() &&
+                              bio.id->fuel_opts.front() == fuel_type_metabolism;
+
+    if( metabolism_powered ) {
+        other_charges = std::max( 0.0f, get_stored_kcal() - 0.8f * get_healthy_kcal() );
+    }
+
+    if( !is_perpetual && !other_charges && result.connected_vehicles.empty() &&
+        result.connected_solar.empty() &&
+        result.connected_fuel.empty() ) {
+        if( metabolism_powered ) {
+            if( start ) {
+                add_msg_player_or_npc( m_info,
+                                       _( "Your %s cannot be started because your calories are below safe levels." ),
+                                       _( "<npcname>'s %s cannot be started because their calories are below safe levels." ),
                                        bio.info().name );
+
+            } else if( bio.powered ) {
+                add_msg_player_or_npc( m_info,
+                                       _( "Stored calories are below the safe threshold, your %s shuts down to preserve your health." ),
+                                       _( "Stored calories are below the safe threshold, <npcname>'s %s shuts down to preserve their health." ),
+                                       bio.info().name );
+
+                bio.powered = false;
+                deactivate_bionic( bio, true );
             }
+        } else if( start ) {
+            add_msg_player_or_npc( m_bad, _( "Your %s does not have enough fuel to start." ),
+                                   _( "<npcname>'s %s does not have enough fuel to start." ),
+                                   bio.info().name );
+        } else if( bio.powered ) {
+            add_msg_player_or_npc( m_info,
+                                   _( "Your %s runs out of fuel and turns off." ),
+                                   _( "<npcname>'s %s runs out of fuel and turns off." ),
+                                   bio.info().name );
+            bio.powered = false;
+            deactivate_bionic( bio, true );
         }
+        result.can_be_on = false;
     }
 
     return result;
 }
 
-void Character::burn_fuel( bionic &bio, const auto_toggle_bionic_result &result )
+void Character::burn_fuel( bionic &bio )
 {
-    if( !bio.powered || !result.can_burn_fuel || !result.has_burnable_fuel ) {
+    float efficiency;
+    if( !bio.powered ) {
+        // Modifiers for passive bionic
+        units::energy trickle = enchantment_cache->modify_value( enchant_vals::mod::POWER_TRICKLE,
+                                0_J );
+        if( trickle != 0_J ) {
+            mod_power_level( trickle );
+        }
+
+        efficiency = get_effective_efficiency( bio, bio.info().passive_fuel_efficiency );
+        if( efficiency == 0.f ) {
+            return;
+        }
+        return;
+    } else {
+        efficiency = get_effective_efficiency( bio, bio.info().fuel_efficiency );
+    }
+
+    if( bio.is_safe_fuel_on()
+        && get_power_level() + 1_kJ * efficiency >= get_max_power_level() * std::min( 1.0f,
+                bio.get_safe_fuel_thresh() ) ) {
+        // Do not waste fuel charging over limit.
+        // 1 kJ treshold to avoid draining full fuel on trickle charge
+        // Individual power sources need their own check for this because power per charge can be large.
         return;
     }
 
+    bionic_fuels result = bionic_fuel_check( bio, false );
+
+    units::energy energy_gain = 0_kJ;
     map &here = get_map();
-    weather_manager &weather = get_weather();
-    switch( result.fuel_type ) {
-        case auto_toggle_bionic_result::fuel_type_t::metabolism: {
-            const int kcal_consumed = result.fuel_energy;
-            // 1kcal = 4184 J
-            const units::energy power_gain = kcal_consumed * 4184_J * result.effective_efficiency;
-            mod_stored_kcal( -kcal_consumed, true );
-            mod_power_level( power_gain );
-            break;
-        }
-        case auto_toggle_bionic_result::fuel_type_t::perpetual:
-            if( result.burnable_fuel_id == fuel_type_sun_light && g->is_in_sunlight( pos() ) ) {
-                const weather_type_id &wtype = current_weather( pos() );
-                const float tick_sunlight = incident_sunlight( wtype, calendar::turn );
-                const double intensity = tick_sunlight / default_daylight_level();
-                mod_power_level( units::from_kilojoule( result.fuel_energy ) * intensity *
-                                 result.effective_efficiency );
-            } else if( result.burnable_fuel_id == fuel_type_wind ) {
-                int vehwindspeed = 0;
-                const optional_vpart_position vp = here.veh_at( pos() );
-                if( vp ) {
-                    // vehicle velocity in mph
-                    vehwindspeed = std::abs( vp->vehicle().velocity / 100 );
-                }
-                const double windpower = get_local_windpower( weather.windspeed + vehwindspeed,
-                                         overmap_buffer.ter( global_omt_location() ), pos(), weather.winddirection,
-                                         g->is_sheltered( pos() ) );
-                mod_power_level( units::from_kilojoule( result.fuel_energy ) * windpower *
-                                 result.effective_efficiency );
-            } else if( result.burnable_fuel_id == fuel_type_muscle ) {
-                // simply return
+
+    // Each bionic *should* have only one power source.
+    // Avoid draining multiple sources. So check for energy_gain = 0_kJ
+
+    // Vehicle may not have power.
+    // Return out if power was drained. Otherwise continue with other sources.
+    if( !result.connected_vehicles.empty() ) {
+        // Cable bionic charging from connected vehicle(s)
+        for( vehicle *veh : result.connected_vehicles ) {
+            int undrained = veh->discharge_battery( 1 );
+            if( undrained == 0 ) {
+                energy_gain = 1_kJ;
+                break;
             }
-            break;
-        case auto_toggle_bionic_result::fuel_type_t::remote: {
-            const int unconsumed = consume_remote_fuel( 1 );
-            int current_fuel_stock = result.current_fuel_stock;
-            if( unconsumed == 0 ) {
-                mod_power_level( units::from_kilojoule( result.fuel_energy ) * result.effective_efficiency );
-                current_fuel_stock -= 1;
+        }
+    }
+
+    // Rest of the fuel sources are known to exist so we can exit after any of them is used
+    if( energy_gain == 0_J && !result.connected_fuel.empty() ) {
+        // Bionic that uses fuel items from some external connected source.
+
+        for( item *fuel_source : result.connected_fuel ) {
+            item *fuel;
+            // Fuel may be ammo or in container
+            if( fuel_source->ammo_remaining() ) {
+                fuel = &fuel_source->first_ammo();
             } else {
-                current_fuel_stock = 0;
+                fuel = fuel_source->all_items_ptr( pocket_type::CONTAINER ).front();
             }
-            set_value( "rem_" + result.burnable_fuel_id.str(), std::to_string( current_fuel_stock ) );
-            break;
-        }
-        case auto_toggle_bionic_result::fuel_type_t::other:
-            set_value( result.burnable_fuel_id.str(), std::to_string( result.current_fuel_stock - 1 ) );
-            update_fuel_storage( result.burnable_fuel_id );
-            mod_power_level( units::from_kilojoule( result.fuel_energy ) * result.effective_efficiency );
-            break;
-    }
+            energy_gain = fuel->fuel_energy();
 
-    heat_emission( bio, result.fuel_energy );
-    here.emit_field( pos(), bio.info().power_gen_emission );
-}
-
-void Character::passive_power_gen( const bionic &bio )
-{
-    const float passive_fuel_efficiency = bio.info().passive_fuel_efficiency;
-    if( bio.info().fuel_opts.empty() || bio.is_this_fuel_powered( fuel_type_muscle ) ||
-        passive_fuel_efficiency == 0.0 ) {
-        return;
-    }
-    const float effective_passive_efficiency = get_effective_efficiency( bio, passive_fuel_efficiency );
-    const std::vector<material_id> &fuel_available = get_fuel_available( bio.id );
-    map &here = get_map();
-    weather_manager &weather = get_weather();
-
-    for( const material_id &fuel : fuel_available ) {
-        const int fuel_energy = fuel->get_fuel_data().energy;
-        if( !fuel->get_fuel_data().is_perpetual_fuel ) {
-            continue;
-        }
-
-        if( fuel == fuel_type_sun_light ) {
-            const double modifier = g->natural_light_level( pos().z ) / default_daylight_level();
-            mod_power_level( units::from_kilojoule( fuel_energy ) * modifier * effective_passive_efficiency );
-        } else if( fuel == fuel_type_wind ) {
-            int vehwindspeed = 0;
-            const optional_vpart_position vp = here.veh_at( pos() );
-            if( vp ) {
-                // vehicle velocity in mph
-                vehwindspeed = std::abs( vp->vehicle().velocity / 100 );
+            if( bio.is_safe_fuel_on() &&
+                get_power_level() + energy_gain * efficiency >= get_max_power_level() * std::min( 1.0f,
+                        bio.get_safe_fuel_thresh() ) ) {
+                // Do not waste fuel charging over limit.
+                return;
             }
-            const double windpower = get_local_windpower( weather.windspeed + vehwindspeed,
-                                     overmap_buffer.ter( global_omt_location() ), pos(), weather.winddirection,
-                                     g->is_sheltered( pos() ) );
-            mod_power_level( units::from_kilojoule( fuel_energy ) * windpower * effective_passive_efficiency );
-        } else {
-            mod_power_level( units::from_kilojoule( fuel_energy ) * effective_passive_efficiency );
-        }
-
-        heat_emission( bio, fuel_energy );
-        here.emit_field( pos(), bio.info().power_gen_emission );
-
-    }
-}
-
-material_id Character::find_remote_fuel( bool look_only )
-{
-    material_id remote_fuel;
-    map &here = get_map();
-
-    const std::vector<item *> cables = items_with( []( const item & it ) {
-        return it.active && it.has_flag( flag_CABLE_SPOOL );
-    } );
-
-    for( const item *cable : cables ) {
-
-        const cata::optional<tripoint> target = cable->get_cable_target( this, pos() );
-        if( !target ) {
-            if( here.is_outside( pos() ) && !is_night( calendar::turn ) &&
-                cable->get_var( "state" ) == "solar_pack_link" ) {
-                if( !look_only ) {
-                    set_value( "sunlight", "1" );
+            if( fuel->count_by_charges() ) {
+                fuel->charges--;
+                if( fuel->charges == 0 ) {
+                    i_rem( fuel );
                 }
-                remote_fuel = fuel_type_sun_light;
+            } else {
+                i_rem( fuel );
             }
 
-            if( cable->get_var( "state" ) == "UPS_link" ) {
-                if( !look_only ) {
-                    int64_t remote_battery = 0;
-                    for( const item *i : all_items_with_flag( flag_IS_UPS ) ) {
-                        if( i->get_var( "cable" ) == "plugged_in" ) {
-                            remote_battery = i->ammo_remaining();
-                        }
-                    }
-                    remote_battery = std::min( remote_battery, units::to_kilojoule( get_max_power_level() ) );
-                    set_value( "rem_battery", std::to_string( remote_battery ) );
-                }
-                remote_fuel = fuel_type_battery;
-            }
-            continue;
         }
-        const optional_vpart_position vp = here.veh_at( *target );
-        if( !vp ) {
-            continue;
-        }
-        if( !look_only ) {
-            set_value( "rem_battery", std::to_string( vp->vehicle().fuel_left( itype_battery,
-                       true ) ) );
-        }
-        remote_fuel = fuel_type_battery;
     }
 
-    return remote_fuel;
+    // There *could* be multiple fuel sources. But we just check first for solar.
+    bool solar_powered = ( !bio.id->fuel_opts.empty() &&
+                           bio.id->fuel_opts.front() == fuel_type_sun_light ) ||
+                         !result.connected_solar.empty();
+    if( energy_gain == 0_J && solar_powered && !g->is_sheltered( pos_bub() ) ) {
+        // Some sort of solar source
+
+        const weather_type_id &wtype = current_weather( pos_abs() );
+        float intensity = incident_sun_irradiance( wtype, calendar::turn ); // W/m2
+
+        if( !result.connected_solar.empty() ) {
+            // Cable charger connected to solar panel item.
+            // There *could* be multiple items. But we only take first.
+            intensity *= result.connected_solar.front()->type->solar_efficiency;
+        }
+        energy_gain = units::from_joule( intensity );
+    }
+
+    // There *could* be multiple fuel sources. But we just check first for solar.
+    bool metabolism_powered = !bio.id->fuel_opts.empty() &&
+                              bio.id->fuel_opts.front() == fuel_type_metabolism;
+    if( energy_gain == 0_J && metabolism_powered ) {
+        // Bionic powered by metabolism
+        // 1kcal = 4184 J
+        energy_gain = 4184_J;
+
+        if( bio.is_safe_fuel_on() &&
+            get_power_level() + energy_gain * efficiency >= get_max_power_level() * std::min( 1.0f,
+                    bio.get_safe_fuel_thresh() ) ) {
+            // Do not waste fuel charging over limit.
+            // Individual power sources need their own check for this because power per charge can be large.
+            return;
+        }
+
+        mod_stored_kcal( -1, true );
+    }
+
+    // There *could* be multiple fuel sources. But we just check first for solar.
+    bool wind_powered = !bio.id->fuel_opts.empty() && bio.id->fuel_opts.front() == fuel_type_wind;
+    if( energy_gain == 0_J && wind_powered ) {
+        // Wind power
+        int vehwindspeed = 0;
+
+        const optional_vpart_position vp = here.veh_at( pos_bub() );
+        if( vp ) {
+            vehwindspeed = std::abs( vp->vehicle().velocity / 100 );
+        }
+        weather_manager &weather = get_weather();
+        const int windpower = get_local_windpower( weather.windspeed + vehwindspeed,
+                              overmap_buffer.ter( pos_abs_omt() ), pos_abs(), weather.winddirection,
+                              g->is_sheltered( pos_bub() ) );
+        energy_gain = 1_kJ * windpower;
+    }
+
+    mod_power_level( energy_gain * efficiency );
+    heat_emission( bio, energy_gain );
+    here.emit_field( pos_bub(), bio.info().power_gen_emission );
 }
 
-int Character::consume_remote_fuel( int amount )
-{
-    int unconsumed_amount = amount;
-    const std::vector<item *> cables = items_with( []( const item & it ) {
-        return it.active && it.has_flag( flag_CABLE_SPOOL );
-    } );
-
-    map &here = get_map();
-    for( const item *cable : cables ) {
-        const cata::optional<tripoint> target = cable->get_cable_target( this, pos() );
-        if( target ) {
-            const optional_vpart_position vp = here.veh_at( *target );
-            if( !vp ) {
-                continue;
-            }
-            unconsumed_amount = vp->vehicle().discharge_battery( amount );
-        }
-    }
-
-    if( unconsumed_amount > 0 ) {
-        for( const item *i : all_items_with_flag( flag_IS_UPS ) ) {
-            if( i->get_var( "cable" ) == "plugged_in" ) {
-                unconsumed_amount -= const_cast<item *>( i )->ammo_consume( unconsumed_amount, tripoint_zero,
-                                     nullptr );
-            }
-            break;
-        }
-    }
-
-    return unconsumed_amount;
-}
-
-void Character::reset_remote_fuel()
-{
-    if( get_bionic_fueled_with( fuel_type_sun_light ).empty() ) {
-        remove_value( "sunlight" );
-    }
-    remove_value( "rem_battery" );
-}
-
-void Character::heat_emission( const bionic &bio, int fuel_energy )
+void Character::heat_emission( const bionic &bio, units::energy fuel_energy )
 {
     if( !bio.info().exothermic_power_gen ) {
         return;
     }
     const float efficiency = bio.info().fuel_efficiency;
 
-    const int heat_prod = fuel_energy * ( 1.0f - efficiency );
+    const int heat_prod = units::to_kilojoule( fuel_energy * ( 1.0f - efficiency ) );
     const int heat_level = std::min( heat_prod / 10, 4 );
     const emit_id hotness = emit_id( "emit_hot_air" + std::to_string( heat_level ) + "_cbm" );
     map &here = get_map();
     if( hotness.is_valid() ) {
         const int heat_spread = std::max( heat_prod / 10 - heat_level, 1 );
-        here.emit_field( pos(), hotness, heat_spread );
+        here.emit_field( pos_bub(), hotness, heat_spread );
     }
     for( const std::pair<const bodypart_str_id, size_t> &bp : bio.info().occupied_bodyparts ) {
         add_effect( effect_heating_bionic, 2_seconds, bp.first.id(), false, heat_prod );
     }
 }
 
-float Character::get_effective_efficiency( const bionic &bio, float fuel_efficiency )
+float Character::get_effective_efficiency( const bionic &bio, float fuel_efficiency ) const
 {
-    const cata::optional<float> &coverage_penalty = bio.info().coverage_power_gen_penalty;
+    const std::optional<float> &coverage_penalty = bio.info().coverage_power_gen_penalty;
     float effective_efficiency = fuel_efficiency;
     if( coverage_penalty ) {
         int coverage = 0;
@@ -1748,11 +1566,10 @@ static bool attempt_recharge( Character &p, bionic &bio, units::energy &amount )
 
 void Character::process_bionic( bionic &bio )
 {
-    const auto_toggle_bionic_result result = auto_toggle_bionic( bio, false );
 
     // Only powered bionics should be processed
     if( !bio.powered ) {
-        passive_power_gen( bio );
+        burn_fuel( bio );
         return;
     }
 
@@ -1774,16 +1591,16 @@ void Character::process_bionic( bionic &bio )
     }
 
     // These might be affected by environmental conditions, status effects, faulty bionics, etc.
-    int discharge_rate = 1;
+    time_duration discharge_rate = 1_turns;
 
     units::energy cost = 0_mJ;
 
-    bio.charge_timer = std::max( 0, bio.charge_timer - discharge_rate );
-    if( bio.charge_timer <= 0 ) {
-        if( bio.info().charge_time > 0 ) {
-            if( bio.info().has_flag( STATIC( json_character_flag( "BIONIC_POWER_SOURCE" ) ) ) ) {
+    bio.charge_timer = std::max( 0_turns, bio.charge_timer - discharge_rate );
+    if( bio.charge_timer <= 0_turns ) {
+        if( bio.info().charge_time > 0_turns ) {
+            if( bio.info().has_flag( json_flag_BIONIC_POWER_SOURCE ) ) {
                 // Convert fuel to bionic power
-                burn_fuel( bio, result );
+                burn_fuel( bio );
                 // Reset timer
                 bio.charge_timer = bio.info().charge_time;
             } else {
@@ -1804,14 +1621,12 @@ void Character::process_bionic( bionic &bio )
         }
     }
 
-    if( !bio.id->processed_eocs.empty() ) {
-        for( const effect_on_condition_id &eoc : bio.id->processed_eocs ) {
-            dialogue d( get_talker_for( *this ), nullptr );
-            if( eoc->type == eoc_type::ACTIVATION ) {
-                eoc->activate( d );
-            } else {
-                debugmsg( "Must use an activation eoc for a bionic process.  If you don't want the effect_on_condition to happen on its own (without the bionic being activated), remove the recurrence min and max.  Otherwise, create a non-recurring effect_on_condition for this bionic with its condition and effects, then have a recurring one queue it." );
-            }
+    for( const effect_on_condition_id &eoc : bio.id->processed_eocs ) {
+        dialogue d( get_talker_for( *this ), nullptr );
+        if( eoc->type == eoc_type::ACTIVATION ) {
+            eoc->activate( d );
+        } else {
+            debugmsg( "Must use an activation eoc for a bionic process.  If you don't want the effect_on_condition to happen on its own (without the bionic being activated), remove the recurrence min and max.  Otherwise, create a non-recurring effect_on_condition for this bionic with its condition and effects, then have a recurring one queue it." );
         }
     }
 
@@ -1822,10 +1637,6 @@ void Character::process_bionic( bionic &bio )
             add_msg_if_player( m_warning, _( "Your %s has lost connection and is turning off." ),
                                bio.info().name );
         }
-    } else if( bio.id == bio_hydraulics ) {
-        // Sound of hissing hydraulic muscle! (not quite as loud as a car horn)
-        sounds::sound( pos(), 19, sounds::sound_t::activity, _( "HISISSS!" ), false, "bionic",
-                       static_cast<std::string>( bio_hydraulics ) );
     } else if( bio.id == bio_nanobots ) {
         std::forward_list<bodypart_id> bleeding_bp_parts;
         for( const bodypart_id &bp : get_all_body_parts() ) {
@@ -1880,18 +1691,27 @@ void Character::process_bionic( bionic &bio )
             mod_power_level( -trigger_cost );
         }
     } else if( bio.id == bio_gills ) {
-        if( has_effect( effect_asthma ) ) {
+        const units::energy trigger_cost = bio.info().power_trigger / 8;
+        if( has_effect( effect_asthma ) && get_power_level() >= trigger_cost ) {
             add_msg_if_player( m_good,
-                               _( "You feel your throat open up and air filling your lungs!" ) );
+                               _( "Your %s activates and you feel your throat open up and air filling your lungs!" ),
+                               bio.info().name );
             remove_effect( effect_asthma );
+            mod_power_level( -trigger_cost );
         }
     } else if( bio.id == bio_evap ) {
+        if( is_underwater() ) {
+            add_msg_if_player( m_info,
+                               _( "Your %s deactivates after it finds itself completely submerged in water." ), bio.info().name );
+            deactivate_bionic( bio );
+        }
+
         // Aero-Evaporator provides water at 60 watts with 2 L / kWh efficiency
         // which is 10 mL per 5 minutes.  Humidity can modify the amount gained.
         if( calendar::once_every( 5_minutes ) ) {
             const w_point weatherPoint = *get_weather().weather_precise;
             int humidity = get_local_humidity( weatherPoint.humidity, get_weather().weather_id,
-                                               g->is_sheltered( pos() ) );
+                                               g->is_sheltered( pos_bub() ) );
             // in thirst units = 5 mL water
             int water_available = std::lround( humidity * 3.0 / 100.0 );
             // At 50% relative humidity or more, the player will draw 10 mL
@@ -1918,7 +1738,7 @@ void Character::process_bionic( bionic &bio )
         }
     } else if( bio.id == afs_bio_dopamine_stimulators ) {
         // Aftershock
-        add_morale( MORALE_FEELING_GOOD, 20, 20, 30_minutes, 20_minutes, true );
+        add_morale( morale_feeling_good, 20, 20, 30_minutes, 20_minutes, true );
     }
 }
 
@@ -1953,7 +1773,7 @@ void Character::bionics_uninstall_failure( int difficulty, int success, float ad
     std::set<bodypart_id> bp_hurt;
     switch( fail_type ) {
         case 1:
-            if( !has_trait( trait_NOPAIN ) ) {
+            if( !has_flag( json_flag_PAIN_IMMUNE ) ) {
                 add_msg_if_player( m_bad, _( "It really hurts!" ) );
                 mod_pain( rng( 10, 30 ) );
             }
@@ -2040,7 +1860,7 @@ void Character::bionics_uninstall_failure( monster &installer, Character &patien
     std::set<bodypart_id> bp_hurt;
     switch( fail_type ) {
         case 1:
-            if( !has_trait( trait_NOPAIN ) ) {
+            if( !has_flag( json_flag_PAIN_IMMUNE ) ) {
                 patient.add_msg_if_player( m_bad, _( "It really hurts!" ) );
                 patient.mod_pain( rng( 10, 30 ) );
             }
@@ -2086,15 +1906,15 @@ void Character::bionics_uninstall_failure( monster &installer, Character &patien
     }
 }
 
-bool Character::has_enough_anesth( const itype &cbm, Character &patient )
+bool Character::has_enough_anesth( const itype &cbm, Character &patient ) const
 {
     if( !cbm.bionic ) {
         debugmsg( "has_enough_anesth( const itype *cbm ): %s is not a bionic", cbm.get_id().str() );
         return false;
     }
 
-    if( patient.has_bionic( bio_painkiller ) || patient.has_trait( trait_NOPAIN ) ||
-        has_trait( trait_DEBUG_BIONICS ) ) {
+    if( patient.has_bionic( bio_painkiller ) || patient.has_flag( json_flag_PAIN_IMMUNE ) ||
+        patient.has_flag( json_flag_MANUAL_CBM_INSTALLATION ) || has_trait( trait_DEBUG_BIONICS ) ) {
         return true;
     }
 
@@ -2105,10 +1925,10 @@ bool Character::has_enough_anesth( const itype &cbm, Character &patient )
     return req_anesth.can_make_with_inventory( crafting_inventory(), is_crafting_component );
 }
 
-bool Character::has_enough_anesth( const itype &cbm )
+bool Character::has_enough_anesth( const itype &cbm ) const
 {
-    if( has_bionic( bio_painkiller ) || has_trait( trait_NOPAIN ) ||
-        has_trait( trait_DEBUG_BIONICS ) ) {
+    if( has_bionic( bio_painkiller ) || has_flag( json_flag_PAIN_IMMUNE ) ||
+        has_flag( json_flag_MANUAL_CBM_INSTALLATION ) || has_trait( trait_DEBUG_BIONICS ) ) {
         return true;
     }
     const int weight = units::to_kilogram( bodyweight() ) / 10;
@@ -2139,7 +1959,7 @@ void Character::consume_anesth_requirement( const itype &cbm, Character &patient
     invalidate_crafting_inventory();
 }
 
-bool Character::has_installation_requirement( const bionic_id &bid )
+bool Character::has_installation_requirement( const bionic_id &bid ) const
 {
     if( bid->installation_requirement.is_empty() ) {
         return false;
@@ -2176,7 +1996,8 @@ float Character::bionics_adjusted_skill( bool autodoc, int skill_level ) const
     // for chance_of_success calculation, shift skill down to a float between ~0.4 - 30
     float adjusted_skill = static_cast<float>( pl_skill ) - std::min( static_cast<float>( 40 ),
                            static_cast<float>( pl_skill ) - static_cast<float>( pl_skill ) / static_cast<float>( 10.0 ) );
-    adjusted_skill *= env_surgery_bonus( 1 ) + get_effect_int( effect_assisted );
+    adjusted_skill += get_effect_int( effect_assisted );
+    adjusted_skill *= env_surgery_bonus( 1 );
     return adjusted_skill;
 }
 
@@ -2196,12 +2017,12 @@ int Character::bionics_pl_skill( bool autodoc, int skill_level ) const
         least_important_skill = skill_mechanics;
     }
 
-    int pl_skill;
+    float pl_skill;
     if( skill_level == -1 ) {
         pl_skill = int_cur                                  * 4 +
-                   get_skill_level( most_important_skill )  * 4 +
-                   get_skill_level( important_skill )       * 3 +
-                   get_skill_level( least_important_skill ) * 1;
+                   get_greater_skill_or_knowledge_level( most_important_skill )  * 4 +
+                   get_greater_skill_or_knowledge_level( important_skill )       * 3 +
+                   get_greater_skill_or_knowledge_level( least_important_skill ) * 1;
     } else {
         // override chance as though all values were skill_level if it is provided
         pl_skill = 12 * skill_level;
@@ -2216,7 +2037,7 @@ int Character::bionics_pl_skill( bool autodoc, int skill_level ) const
     if( has_trait( trait_PROF_AUTODOC ) ) {
         pl_skill += 7;
     }
-    return pl_skill;
+    return round( pl_skill );
 }
 
 int bionic_success_chance( bool autodoc, int skill_level, int difficulty, const Character &target )
@@ -2227,7 +2048,8 @@ int bionic_success_chance( bool autodoc, int skill_level, int difficulty, const 
 // bionic manipulation chance of success
 int bionic_manip_cos( float adjusted_skill, int bionic_difficulty )
 {
-    if( get_player_character().has_trait( trait_DEBUG_BIONICS ) ) {
+    if( get_player_character().has_trait( trait_DEBUG_BIONICS ) ||
+        get_player_character().has_flag( json_flag_MANUAL_CBM_INSTALLATION ) ) {
         return 100;
     }
 
@@ -2247,7 +2069,7 @@ int bionic_manip_cos( float adjusted_skill, int bionic_difficulty )
 }
 
 bool Character::can_uninstall_bionic( const bionic &bio, Character &installer, bool autodoc,
-                                      int skill_level )
+                                      int skill_level ) const
 {
 
     // if malfunctioning bionics doesn't have associated item it gets a difficulty of 12
@@ -2265,6 +2087,14 @@ bool Character::can_uninstall_bionic( const bionic &bio, Character &installer, b
         popup( _( "%s must remove the parent bionic to remove the %s." ), installer.disp_name(),
                bio.id->name );
         return false;
+    }
+
+    for( const bionic_id &bid : get_bionics() ) {
+        if( bid->required_bionic && bid->required_bionic == bio.id ) {
+            popup( _( "%s cannot be removed because installed bionic %s requires it." ), bio.id->name,
+                   bid->name );
+            return false;
+        }
     }
 
     if( bio.id->cant_remove_reason.has_value() ) {
@@ -2310,15 +2140,15 @@ bool Character::uninstall_bionic( const bionic &bio, Character &installer, bool 
     int chance_of_success = bionic_success_chance( autodoc, skill_level, difficulty + 2, installer );
 
     // Surgery is imminent, retract claws or blade if active
-    for( size_t i = 0; i < installer.my_bionics->size(); i++ ) {
-        bionic &bio = ( *installer.my_bionics )[ i ];
-        if( bio.powered && bio.info().has_flag( json_flag_BIONIC_WEAPON ) ) {
-            installer.deactivate_bionic( bio );
+    for( bionic &it : *installer.my_bionics ) {
+        if( it.powered && it.info().has_flag( json_flag_BIONIC_WEAPON ) ) {
+            installer.deactivate_bionic( it );
         }
     }
 
     int success = chance_of_success - rng( 1, 100 );
-    if( installer.has_trait( trait_DEBUG_BIONICS ) ) {
+    if( installer.has_trait( trait_DEBUG_BIONICS ) ||
+        installer.has_flag( json_flag_MANUAL_CBM_INSTALLATION ) ) {
         perform_uninstall( bio, difficulty, success, pl_skill );
         return true;
     }
@@ -2346,7 +2176,7 @@ bool Character::uninstall_bionic( const bionic &bio, Character &installer, bool 
 void Character::perform_uninstall( const bionic &bio, int difficulty, int success, int pl_skill )
 {
     map &here = get_map();
-    cata::optional<bionic *> bio_opt = find_bionic_by_uid( bio.get_uid() );
+    std::optional<bionic *> bio_opt = find_bionic_by_uid( bio.get_uid() );
     if( !bio_opt ) {
         debugmsg( "Tried to uninstall non-existent bionic with UID %d", bio.get_uid() );
         return;
@@ -2362,17 +2192,22 @@ void Character::perform_uninstall( const bionic &bio, int difficulty, int succes
         const bionic_id bio_id = bio.id;
         remove_bionic( bio );
 
-        item cbm( "burnt_out_bionic" );
+        // give us any muts it's supposed to (silently) if removed
+        for( const trait_id &mid : bio_id->give_mut_on_removal ) {
+            if( !has_trait( mid ) ) {
+                set_mutation( mid );
+            }
+        }
+
+        item cbm( itype_burnt_out_bionic );
         if( item::type_is_defined( bio_id->itype() ) ) {
-            cbm = item( bio_id.c_str() );
+            cbm = item( bio_id->itype() );
         }
         cbm.set_flag( flag_FILTHY );
         cbm.set_flag( flag_NO_STERILE );
         cbm.set_flag( flag_NO_PACKED );
         cbm.faults.emplace( fault_bionic_salvaged );
-        here.add_item( pos(), cbm );
-
-        invalidate_pseudo_items();
+        here.add_item( pos_bub(), cbm );
     } else {
         get_event_bus().send<event_type::fails_to_remove_cbm>( getID(), bio.id );
         // for chance_of_success calculation, shift skill down to a float between ~0.4 - 30
@@ -2394,7 +2229,7 @@ bool Character::uninstall_bionic( const bionic &bio, monster &installer, Charact
         return false;
     }
 
-    item bionic_to_uninstall = item( bio.id.str(), calendar::turn_zero );
+    item bionic_to_uninstall = item( bio.info().itype(), calendar::turn_zero );
     const itype *itemtype = bionic_to_uninstall.type;
     int difficulty = itemtype->bionic->difficulty;
     int chance_of_success = bionic_manip_cos( adjusted_skill, difficulty + 2 );
@@ -2438,16 +2273,16 @@ bool Character::uninstall_bionic( const bionic &bio, monster &installer, Charact
             add_msg( m_mixed, _( "Successfully removed %s." ), bio.info().name );
         }
 
-        patient.remove_bionic( bio );
-        item cbm( "burnt_out_bionic" );
+        item cbm( itype_burnt_out_bionic );
         if( item::type_is_defined( bio.info().itype() ) ) {
             cbm = bionic_to_uninstall;
         }
+        patient.remove_bionic( bio );
         cbm.set_flag( flag_FILTHY );
         cbm.set_flag( flag_NO_STERILE );
         cbm.set_flag( flag_NO_PACKED );
         cbm.faults.emplace( fault_bionic_salvaged );
-        get_map().add_item( patient.pos(), cbm );
+        get_map().add_item( patient.pos_bub(), cbm );
     } else {
         bionics_uninstall_failure( installer, patient, difficulty, success, adjusted_skill );
     }
@@ -2455,9 +2290,8 @@ bool Character::uninstall_bionic( const bionic &bio, monster &installer, Charact
     return false;
 }
 
-ret_val<bool> Character::is_installable( const item_location &loc, const bool by_autodoc ) const
+ret_val<void> Character::is_installable( const item *it, const bool by_autodoc ) const
 {
-    const item *it = loc.get_item();
     const itype *itemtype = it->type;
     const bionic_id &bid = itemtype->bionic->id;
 
@@ -2469,46 +2303,51 @@ ret_val<bool> Character::is_installable( const item_location &loc, const bool by
         // NOLINTNEXTLINE(cata-text-style): single space after the period for symmetry
         const std::string msg = by_autodoc ? _( "/!\\ CBM is highly contaminated. /!\\" ) :
                                 _( "CBM is filthy." );
-        return ret_val<bool>::make_failure( msg );
+        return ret_val<void>::make_failure( msg );
     } else if( it->has_flag( flag_NO_STERILE ) ) {
         const std::string msg = by_autodoc ?
                                 // NOLINTNEXTLINE(cata-text-style): single space after the period for symmetry
                                 _( "/!\\ CBM is not sterile. /!\\ Please use autoclave to sterilize." ) :
                                 _( "CBM is not sterile." );
-        return ret_val<bool>::make_failure( msg );
+        return ret_val<void>::make_failure( msg );
     } else if( it->has_fault( fault_bionic_salvaged ) ) {
-        return ret_val<bool>::make_failure( _( "CBM already deployed.  Please reset to factory state." ) );
+        return ret_val<void>::make_failure( _( "CBM already deployed.  Please reset to factory state." ) );
     } else if( has_bionic( bid ) && !bid->dupes_allowed ) {
-        return ret_val<bool>::make_failure( _( "CBM is already installed." ) );
+        return ret_val<void>::make_failure( _( "CBM is already installed." ) );
     } else if( !can_install_cbm_on_bp( get_occupied_bodyparts( bid ) ) ) {
-        return ret_val<bool>::make_failure( _( "CBM not compatible with patient's body." ) );
+        return ret_val<void>::make_failure( _( "CBM not compatible with patient's body." ) );
     } else if( std::any_of( bid->mutation_conflicts.begin(), bid->mutation_conflicts.end(),
                             has_trait_lambda ) ) {
-        return ret_val<bool>::make_failure( _( "CBM not compatible with patient's body." ) );
+        return ret_val<void>::make_failure( _( "CBM not compatible with patient's body." ) );
     } else if( bid->upgraded_bionic &&
                !has_bionic( bid->upgraded_bionic ) &&
                it->is_upgrade() ) {
-        return ret_val<bool>::make_failure( _( "No base version installed." ) );
+        return ret_val<void>::make_failure( _( "No base version installed." ) );
+    } else if( bid->required_bionic &&
+               !has_bionic( bid->required_bionic ) ) {
+        return ret_val<void>::make_failure( _( "CBM requires prior installation of %s." ),
+                                            bid->required_bionic.obj().name );
     } else if( std::any_of( bid->available_upgrades.begin(),
                             bid->available_upgrades.end(),
-                            std::bind( &Character::has_bionic, this,
-                                       std::placeholders::_1 ) ) ) {
-        return ret_val<bool>::make_failure( _( "Superior version installed." ) );
+    [this]( const bionic_id & b ) {
+    return has_bionic( b );
+    } ) ) {
+        return ret_val<void>::make_failure( _( "Superior version installed." ) );
     } else if( is_npc() && !bid->has_flag( json_flag_BIONIC_NPC_USABLE ) ) {
-        return ret_val<bool>::make_failure( _( "CBM not compatible with patient." ) );
+        return ret_val<void>::make_failure( _( "CBM not compatible with patient." ) );
     }
 
-    return ret_val<bool>::make_success( std::string() );
+    return ret_val<void>::make_success( std::string() );
 }
 
 bool Character::can_install_bionics( const itype &type, Character &installer, bool autodoc,
-                                     int skill_level )
+                                     int skill_level ) const
 {
     if( !type.bionic ) {
         debugmsg( "Tried to install NULL bionic" );
         return false;
     }
-    if( has_trait( trait_DEBUG_BIONICS ) ) {
+    if( has_trait( trait_DEBUG_BIONICS ) || has_flag( json_flag_MANUAL_CBM_INSTALLATION ) ) {
         return true;
     }
     if( is_mounted() ) {
@@ -2529,7 +2368,7 @@ bool Character::can_install_bionics( const itype &type, Character &installer, bo
     std::vector<std::string> conflicting_muts;
     for( const trait_id &mid : bioid->canceled_mutations ) {
         if( has_trait( mid ) ) {
-            conflicting_muts.push_back( mid->name() );
+            conflicting_muts.push_back( mutation_name( mid ) );
         }
     }
 
@@ -2576,9 +2415,10 @@ float Character::env_surgery_bonus( int radius ) const
 {
     float bonus = 1.0f;
     map &here = get_map();
-    for( const tripoint &cell : here.points_in_radius( pos(), radius ) ) {
-        if( here.furn( cell )->surgery_skill_multiplier ) {
-            bonus = std::max( bonus, *here.furn( cell )->surgery_skill_multiplier );
+    for( const tripoint_bub_ms &cell : here.points_in_radius( pos_bub(), radius ) ) {
+        const furn_id &f = here.furn( cell );
+        if( f->surgery_skill_multiplier ) {
+            bonus = std::max( bonus, *f->surgery_skill_multiplier );
         }
     }
     return bonus;
@@ -2607,14 +2447,15 @@ bool Character::install_bionics( const itype &type, Character &installer, bool a
 
     bionic_uid upbio_uid = 0;
     // TODO: Let the player pick a bionic to upgrade (if dupes exist)
-    if( cata::optional<bionic *> upbio = find_bionic_by_type( upbioid ) ) {
+    if( std::optional<bionic *> upbio = find_bionic_by_type( upbioid ) ) {
         upbio_uid = ( *upbio )->get_uid();
     }
 
     int success = chance_of_success - rng( 0, 99 );
-    if( installer.has_trait( trait_DEBUG_BIONICS ) ) {
+    if( installer.has_trait( trait_DEBUG_BIONICS ) ||
+        installer.has_flag( json_flag_MANUAL_CBM_INSTALLATION ) ) {
         perform_install( bioid, upbio_uid, difficulty, success, pl_skill, "NOT_MED",
-                         bioid->canceled_mutations, pos() );
+                         bioid->canceled_mutations, pos_bub() );
         return true;
     }
     assign_activity( ACT_OPERATION, to_moves<int>( difficulty * 20_minutes ) );
@@ -2644,12 +2485,15 @@ bool Character::install_bionics( const itype &type, Character &installer, bool a
 
 void Character::perform_install( const bionic_id &bid, bionic_uid upbio_uid, int difficulty,
                                  int success, int pl_skill, const std::string &installer_name,
-                                 const std::vector<trait_id> &trait_to_rem, const tripoint &patient_pos )
+                                 const std::vector<trait_id> &trait_to_rem, const tripoint_bub_ms &patient_pos )
 {
+    // if we chop off a limb, our stored kcal should decrease proportionally
+    float cached_healthy_kcal = get_healthy_kcal();
+
     if( success > 0 ) {
         get_event_bus().send<event_type::installs_cbm>( getID(), bid );
         if( upbio_uid ) {
-            if( cata::optional<bionic *> upbio = find_bionic_by_uid( upbio_uid ) ) {
+            if( std::optional<bionic *> upbio = find_bionic_by_uid( upbio_uid ) ) {
                 const std::string bio_name = ( *upbio )->id->name.translated();
                 remove_bionic( **upbio );
                 //~ %1$s - name of the bionic to be upgraded (inferior), %2$s - name of the upgraded bionic (superior).
@@ -2664,13 +2508,14 @@ void Character::perform_install( const bionic_id &bid, bionic_uid upbio_uid, int
 
         add_bionic( bid );
 
-        if( !trait_to_rem.empty() ) {
-            for( const trait_id &tid : trait_to_rem ) {
-                if( has_trait( tid ) ) {
-                    remove_mutation( tid );
-                }
+        for( const trait_id &tid : trait_to_rem ) {
+            if( has_trait( tid ) ) {
+                remove_mutation( tid );
             }
         }
+        // now that bionic has been added, compare our new healthy kcal to our old healthy kcal and multiply stored kcal by the ratio
+        set_stored_kcal( get_stored_kcal() * ( static_cast<float>( get_healthy_kcal() ) /
+                                               cached_healthy_kcal ) );
 
     } else {
         get_event_bus().send<event_type::fails_to_install_cbm>( getID(), bid );
@@ -2686,7 +2531,7 @@ void Character::perform_install( const bionic_id &bid, bionic_uid upbio_uid, int
 }
 
 void Character::bionics_install_failure( const bionic_id &bid, const std::string &installer,
-        int difficulty, int success, float adjusted_skill, const tripoint &patient_pos )
+        int difficulty, int success, float adjusted_skill, const tripoint_bub_ms &patient_pos )
 {
     // "success" should be passed in as a negative integer representing how far off we
     // were for a successful install.  We use this to determine consequences for failing.
@@ -2719,7 +2564,7 @@ void Character::bionics_install_failure( const bionic_id &bid, const std::string
         switch( fail_type ) {
 
             case 1:
-                if( !has_trait( trait_NOPAIN ) ) {
+                if( !has_flag( json_flag_PAIN_IMMUNE ) ) {
                     add_msg_if_player( m_bad, _( "It really hurts!" ) );
                     mod_pain( rng( 10, 30 ) );
                 }
@@ -2776,7 +2621,7 @@ void Character::bionics_install_failure( const bionic_id &bid, const std::string
         }
     }
     if( drop_cbm ) {
-        item cbm( bid.c_str() );
+        item cbm( bid->itype() );
         cbm.set_flag( flag_NO_STERILE );
         cbm.set_flag( flag_NO_PACKED );
         cbm.faults.emplace( fault_bionic_salvaged );
@@ -2824,6 +2669,12 @@ bool Character::has_active_bionic( const bionic_id &b ) const
 {
     for( const bionic &i : *my_bionics ) {
         if( i.id == b ) {
+            if( i.is_safe_fuel_on() &&
+                get_power_level() + 1_kJ > get_max_power_level() * std::min( 1.0f, i.get_safe_fuel_thresh() ) ) {
+                // Inactive due to fuel treshold
+                return false;
+            }
+
             return ( i.powered && i.incapacitated_time == 0_turns );
         }
     }
@@ -2867,7 +2718,7 @@ int Character::get_total_bionics_slots( const bodypart_id &bp ) const
 {
     const bodypart_str_id &id = bp.id();
     int mut_bio_slots = 0;
-    for( const trait_id &mut : get_mutations() ) {
+    for( const trait_id &mut : get_functioning_mutations() ) {
         mut_bio_slots += mut->bionic_slot_bonus( id );
     }
     return bp->bionic_slots() + mut_bio_slots;
@@ -2878,10 +2729,13 @@ int Character::get_free_bionics_slots( const bodypart_id &bp ) const
     return get_total_bionics_slots( bp ) - get_used_bionics_slots( bp );
 }
 
-bionic_uid Character::add_bionic( const bionic_id &b, bionic_uid parent_uid )
+bionic_uid Character::add_bionic( const bionic_id &b, bionic_uid parent_uid,
+                                  bool suppress_debug )
 {
     if( has_bionic( b ) && !b->dupes_allowed ) {
-        debugmsg( "Tried to install bionic %s that is already installed!", b.c_str() );
+        if( !suppress_debug ) {
+            debugmsg( "Tried to install bionic %s that is already installed!", b.c_str() );
+        }
         return 0;
     }
 
@@ -2893,14 +2747,15 @@ bionic_uid Character::add_bionic( const bionic_id &b, bionic_uid parent_uid )
 
     bionic_uid bio_uid = generate_bionic_uid();
 
-    my_bionics->emplace_back( b, get_free_invlet( *this ), bio_uid, parent_uid );
+    const char invlet = b->activated ? get_free_invlet( *this ) : ' ';
+    my_bionics->emplace_back( b, invlet, bio_uid, parent_uid );
     bionic &bio = my_bionics->back();
     if( bio.id->activated_on_install ) {
         activate_bionic( bio );
     }
 
     for( const bionic_id &inc_bid : b->included_bionics ) {
-        add_bionic( inc_bid, bio_uid );
+        add_bionic( inc_bid, bio_uid, suppress_debug );
     }
 
     for( const std::pair<const spell_id, int> &spell_pair : b->learned_spells ) {
@@ -2921,7 +2776,7 @@ bionic_uid Character::add_bionic( const bionic_id &b, bionic_uid parent_uid )
         spell &known_spell = magic->get_spell( learned_spell );
         // spells you learn from installing a bionic upgrade spells you know if they are the same
         if( known_spell.get_level() < spell_pair.second ) {
-            known_spell.set_level( spell_pair.second );
+            known_spell.set_level( *this, spell_pair.second );
         }
     }
 
@@ -2929,6 +2784,14 @@ bionic_uid Character::add_bionic( const bionic_id &b, bionic_uid parent_uid )
         add_proficiency( learned );
     }
 
+    for( const itype_id &pseudo : b->passive_pseudo_items ) {
+        item tmparmor( pseudo );
+        if( tmparmor.has_flag( flag_INTEGRATED ) ) {
+            wear_item( tmparmor, false );
+        }
+    }
+    bio_flag_cache.clear();
+    invalidate_pseudo_items();
     update_bionic_power_capacity();
 
     calc_encumbrance();
@@ -2942,25 +2805,23 @@ bionic_uid Character::add_bionic( const bionic_id &b, bionic_uid parent_uid )
     }
     effect_on_conditions::process_reactivate( *this );
 
-    invalidate_pseudo_items();
-
     return bio_uid;
 }
 
-cata::optional<bionic *> Character::find_bionic_by_type( const bionic_id &b ) const
+std::optional<bionic *> Character::find_bionic_by_type( const bionic_id &b ) const
 {
     for( bionic &bio : *my_bionics ) {
         if( bio.id == b ) {
             return &bio;
         }
     }
-    return cata::nullopt;
+    return std::nullopt;
 }
 
-cata::optional<bionic *> Character::find_bionic_by_uid( bionic_uid bio_uid ) const
+std::optional<bionic *> Character::find_bionic_by_uid( bionic_uid bio_uid ) const
 {
     if( !bio_uid ) {
-        return cata::nullopt;
+        return std::nullopt;
     }
 
     for( bionic &bio : *my_bionics ) {
@@ -2968,13 +2829,13 @@ cata::optional<bionic *> Character::find_bionic_by_uid( bionic_uid bio_uid ) con
             return &bio;
         }
     }
-    return cata::nullopt;
+    return std::nullopt;
 }
 
 void Character::remove_bionic( const bionic &bio )
 {
     const bionic_uid bio_uid = bio.get_uid();
-    cata::optional<bionic *> bio_opt = find_bionic_by_uid( bio_uid );
+    std::optional<bionic *> bio_opt = find_bionic_by_uid( bio_uid );
     if( !bio_opt ) {
         debugmsg( "Tried to uninstall non-existent bionic with UID %d", bio_uid );
         return;
@@ -3007,14 +2868,25 @@ void Character::remove_bionic( const bionic &bio )
         lose_proficiency( lost );
     }
 
+    for( const itype_id &popped_armor : bio.id->passive_pseudo_items ) {
+        remove_worn_items_with( [&]( item & armor ) {
+            return armor.typeId() == popped_armor;
+        } );
+    }
+
     const bool has_enchantments = !bio.id->enchantments.empty();
     *my_bionics = new_my_bionics;
+    bio_flag_cache.clear();
+    update_last_bionic_uid();
+    invalidate_pseudo_items();
     update_bionic_power_capacity();
     calc_encumbrance();
     recalc_sight_limits();
     if( has_enchantments ) {
         recalculate_enchantment_cache();
     }
+    // clean up any changes from bionic limbs
+    recalculate_bodyparts();
     effect_on_conditions::process_reactivate( *this );
 }
 
@@ -3030,11 +2902,15 @@ bionic &Character::bionic_at_index( int i )
 
 void Character::clear_bionics()
 {
-    my_bionics->clear();
+    set_max_power_level_modifier( 0_kJ );
+    while( !my_bionics->empty() ) {
+        remove_bionic( my_bionics->front() );
+    }
 }
 
 void reset_bionics()
 {
+    bionic_data::migrations.clear();
     faulty_bionics.clear();
     bionic_factory.reset();
 }
@@ -3117,20 +2993,20 @@ bool bionic::install_weapon( const item &new_weapon, bool skip_checks )
     return true;
 }
 
-cata::optional<item> bionic::uninstall_weapon()
+std::optional<item> bionic::uninstall_weapon()
 {
     if( !has_weapon() ) {
         debugmsg( "Tried to uninstall a weapon on bionic \"%s\" with UID %i that doesn't have a weapon installed.",
                   id.str(), uid );
-        return cata::nullopt;
+        return std::nullopt;
     }
 
     if( id->installable_weapon_flags.empty() ) {
         debugmsg( "Tried to uinstall a weapon from non-dynamic bionic \"%s\" with UID %i.", id.str(),
                   uid );
-        return cata::nullopt;
+        return std::nullopt;
     }
-    cata::optional<item> old_item = get_weapon();
+    std::optional<item> old_item = get_weapon();
     weapon = item();
 
     if( old_item && !old_item->is_null() ) {
@@ -3144,6 +3020,7 @@ cata::optional<item> bionic::uninstall_weapon()
 std::vector<const item *> bionic::get_available_pseudo_items( bool include_weapon ) const
 {
     std::vector<const item *> ret;
+    ret.reserve( passive_pseudo_items.size() );
     for( const item &pseudo : passive_pseudo_items ) {
         ret.push_back( &pseudo );
     }
@@ -3171,18 +3048,14 @@ void bionic::toggle_safe_fuel_mod()
 {
     if( !info().fuel_opts.empty() || info().is_remote_fueled ) {
         uilist tmenu;
-        tmenu.text = _( "Chose Safe Fuel Level Threshold" );
-        tmenu.addentry( 1, true, 'o', _( "Full Power" ) );
-        if( get_auto_start_thresh() < 0.80 ) {
-            tmenu.addentry( 2, true, 't', _( "Above 80 %%" ) );
-        }
-        if( get_auto_start_thresh() < 0.55 ) {
-            tmenu.addentry( 3, true, 'f', _( "Above 55 %%" ) );
-        }
-        if( get_auto_start_thresh() < 0.30 ) {
-            tmenu.addentry( 4, true, 's', _( "Above 30 %%" ) );
-        }
-        tmenu.addentry( 5, true, 'd', _( "Disabled" ) );
+        tmenu.text = _( "Stop power generation at" );
+        tmenu.addentry( 1, true, '1', _( "100 %%" ) );
+        tmenu.addentry( 2, true, '2', _( "90 %%" ) );
+        tmenu.addentry( 3, true, '3', _( "70 %%" ) );
+        tmenu.addentry( 4, true, '4', _( "50 %%" ) );
+        tmenu.addentry( 5, true, '5', _( "30 %%" ) );
+        tmenu.addentry( 6, true, '6', _( "10 %%" ) );
+        tmenu.addentry( 7, true, 'd', _( "Disabled" ) );
         tmenu.query();
 
         switch( tmenu.ret ) {
@@ -3190,76 +3063,27 @@ void bionic::toggle_safe_fuel_mod()
                 set_safe_fuel_thresh( 1.0f );
                 break;
             case 2:
-                set_safe_fuel_thresh( 0.80f );
+                set_safe_fuel_thresh( 0.90f );
                 break;
             case 3:
-                set_safe_fuel_thresh( 0.55f );
+                set_safe_fuel_thresh( 0.70f );
                 break;
             case 4:
-                set_safe_fuel_thresh( 0.30f );
+                set_safe_fuel_thresh( 0.50f );
                 break;
             case 5:
+                set_safe_fuel_thresh( 0.30f );
+                break;
+            case 6:
+                set_safe_fuel_thresh( 0.10f );
+                break;
+            case 7:
                 set_safe_fuel_thresh( -1.0f );
-            default:
-                break;
-        }
-    }
-}
-
-void bionic::toggle_auto_start_mod()
-{
-    if( info().fuel_opts.empty() && !info().is_remote_fueled ) {
-        return;
-    }
-    if( !is_auto_start_on() ) {
-        uilist tmenu;
-        tmenu.text = _( "Chose Start Power Level Threshold" );
-        tmenu.addentry( 1, true, 'o', _( "No Power Left" ) );
-        if( get_safe_fuel_thresh() > 0.25 ) {
-            tmenu.addentry( 2, true, 't', _( "Below 25 %%" ) );
-        }
-        if( get_safe_fuel_thresh() > 0.50 ) {
-            tmenu.addentry( 3, true, 'f', _( "Below 50 %%" ) );
-        }
-        if( get_safe_fuel_thresh() > 0.75 ) {
-            tmenu.addentry( 4, true, 's', _( "Below 75 %%" ) );
-        }
-        tmenu.query();
-
-        switch( tmenu.ret ) {
-            case 1:
-                set_auto_start_thresh( 0.0 );
-                break;
-            case 2:
-                set_auto_start_thresh( 0.25 );
-                break;
-            case 3:
-                set_auto_start_thresh( 0.5 );
-                break;
-            case 4:
-                set_auto_start_thresh( 0.75 );
                 break;
             default:
                 break;
         }
-    } else {
-        set_auto_start_thresh( -1.0 );
     }
-}
-
-void bionic::set_auto_start_thresh( float val )
-{
-    auto_start_threshold = val;
-}
-
-float bionic::get_auto_start_thresh() const
-{
-    return auto_start_threshold;
-}
-
-bool bionic::is_auto_start_on() const
-{
-    return get_auto_start_thresh() > -1.0;
 }
 
 float bionic::get_safe_fuel_thresh() const
@@ -3269,7 +3093,7 @@ float bionic::get_safe_fuel_thresh() const
 
 bool bionic::is_safe_fuel_on() const
 {
-    return get_safe_fuel_thresh() < 2.0;
+    return info().has_flag( json_flag_BIONIC_POWER_SOURCE ) && get_safe_fuel_thresh() > -1.f;
 }
 
 void bionic::set_safe_fuel_thresh( float val )
@@ -3290,12 +3114,10 @@ void bionic::serialize( JsonOut &json ) const
     if( incapacitated_time > 0_turns ) {
         json.member( "incapacitated_time", incapacitated_time );
     }
-    if( is_auto_start_on() ) {
-        json.member( "auto_start_threshold", auto_start_threshold );
-    }
     if( is_safe_fuel_on() ) {
         json.member( "safe_fuel_threshold", safe_fuel_threshold );
     }
+    json.member( "show_sprite", show_sprite );
 
     if( has_weapon() ) {
         json.member( "weapon", weapon );
@@ -3304,21 +3126,56 @@ void bionic::serialize( JsonOut &json ) const
     json.end_object();
 }
 
+static bionic_id migrate_bionic_id( const bionic_id &original )
+{
+    bionic_id bid = original;
+
+    // limit up to 10 migrations per bionic (guard in case of accidental loops)
+    for( int i = 0; i < 10; i++ ) {
+        const auto &migration_it = bionic_data::migrations.find( bid );
+        if( migration_it == bionic_data::migrations.cend() ) {
+            break;
+        }
+        bid = migration_it->second;
+    }
+
+    if( bid != original ) {
+        DebugLog( D_WARNING, D_MAIN ) << "Migrating bionic with id " << original.str() << " to " <<
+                                      bid.str();
+    }
+
+    return bid;
+}
+
 void bionic::deserialize( const JsonObject &jo )
 {
-    id = bionic_id( jo.get_string( "id" ) );
+    id = migrate_bionic_id( bionic_id( jo.get_string( "id" ) ) );
+    if( !id.is_valid() ) {
+        debugmsg( "deserialized bionic id '%s' doesn't exist and has no migration", id.str() );
+        id = bionic_id::NULL_ID(); // remove it
+    }
+    if( id.is_null() ) {
+        jo.allow_omitted_members();
+        return; // obsoleted bionics migrated to bionic_id::NULL_ID ids
+    }
     invlet = jo.get_int( "invlet" );
     powered = jo.get_bool( "powered" );
-    charge_timer = jo.get_int( "charge" );
+
+    //Remove After 0.G
+    if( jo.has_int( "charge" ) ) {
+        charge_timer = time_duration::from_turns( jo.get_int( "charge" ) );
+    } else {
+        jo.read( "charge_timer", charge_timer );
+    }
 
     if( jo.has_int( "incapacitated_time" ) ) {
         incapacitated_time = 1_turns * jo.get_int( "incapacitated_time" );
     }
-    if( jo.has_float( "auto_start_threshold" ) ) {
-        auto_start_threshold = jo.get_float( "auto_start_threshold" );
-    }
     if( jo.has_float( "safe_fuel_threshold" ) ) {
         safe_fuel_threshold = jo.get_float( "safe_fuel_threshold" );
+    }
+    if( jo.has_bool( "show_sprite" ) ) {
+        show_sprite = jo.get_bool( "show_sprite" );
     }
     if( jo.has_array( "bionic_tags" ) ) {
         for( const std::string line : jo.get_array( "bionic_tags" ) ) {
@@ -3406,8 +3263,7 @@ void Character::introduce_into_anesthesia( const time_duration &duration, Charac
     }
 
     //Pain junkies feel sorry about missed pain from operation.
-    if( has_trait( trait_MASOCHIST ) || has_trait( trait_MASOCHIST_MED ) ||
-        has_trait( trait_CENOBITE ) ) {
+    if( has_trait( trait_MASOCHIST_MED ) || has_trait( trait_CENOBITE ) ) {
         add_msg_if_player( m_mixed,
                            _( "As your consciousness slips away, you feel regret that you won't be able to enjoy the operation." ) );
     }
@@ -3425,55 +3281,13 @@ void Character::introduce_into_anesthesia( const time_duration &duration, Charac
     }
 }
 
-bool Character::can_fuel_bionic_with( const item &it ) const
-{
-    // the item needs fuel data, or it needs to be a magazine with an item with fuel data.
-    if( !it.is_fuel() ) {
-        if( it.is_magazine() ) {
-            if( !item( it.ammo_current() ).is_fuel() ) {
-                return false;
-            }
-        } else {
-            return false;
-        }
-    }
-    for( const bionic_id &bid : get_bionics() ) {
-        for( const material_id &fuel : bid->fuel_opts ) {
-            if( fuel == it.get_base_material().id ) {
-                return true;
-            }
-            if( it.type->magazine && fuel == item( it.ammo_current() ).get_base_material().id ) {
-                return true;
-            }
-        }
-
-    }
-    return false;
-}
-
-std::vector<bionic_id> Character::get_bionic_fueled_with( const item &it ) const
+std::vector<bionic_id> Character::get_bionic_fueled_with_muscle() const
 {
     std::vector<bionic_id> bionics;
 
     for( const bionic_id &bid : get_bionics() ) {
         for( const material_id &fuel : bid->fuel_opts ) {
-            if( fuel == it.get_base_material().id ||
-                ( it.type->magazine && fuel == item( it.ammo_current() ).get_base_material().id ) ) {
-                bionics.emplace_back( bid );
-            }
-        }
-    }
-
-    return bionics;
-}
-
-std::vector<bionic_id> Character::get_bionic_fueled_with( const material_id &mat ) const
-{
-    std::vector<bionic_id> bionics;
-
-    for( const bionic_id &bid : get_bionics() ) {
-        for( const material_id &fuel : bid->fuel_opts ) {
-            if( fuel == mat ) {
+            if( fuel == material_muscle ) {
                 bionics.emplace_back( bid );
             }
         }
@@ -3493,19 +3307,6 @@ std::vector<bionic_id> Character::get_fueled_bionics() const
     return bionics;
 }
 
-bionic_id Character::get_most_efficient_bionic( const std::vector<bionic_id> &bids ) const
-{
-    float temp_eff = 0.0f;
-    bionic_id bio( "null" );
-    for( const bionic_id &bid : bids ) {
-        if( bid->fuel_efficiency > temp_eff ) {
-            temp_eff = bid->fuel_efficiency;
-            bio = bid;
-        }
-    }
-    return bio;
-}
-
 bionic_id Character::get_remote_fueled_bionic() const
 {
     for( const bionic_id &bid : get_bionics() ) {
@@ -3516,108 +3317,124 @@ bionic_id Character::get_remote_fueled_bionic() const
     return bionic_id();
 }
 
-std::vector<material_id> Character::get_fuel_available( const bionic_id &bio ) const
+std::vector<item *> Character::get_bionic_fuels( const bionic_id &bio )
 {
-    std::vector<material_id> stored_fuels;
-    for( const material_id &fuel : bio->fuel_opts ) {
-        if( !get_value( fuel.str() ).empty() || fuel->get_fuel_data().is_perpetual_fuel ) {
-            stored_fuels.emplace_back( fuel );
+    std::vector<item *> stored_fuels;
+
+    for( item_location it : top_items_loc() ) {
+        if( !it->has_flag( flag_BIONIC_FUEL_SOURCE ) ) {
+            continue;
+        }
+        for( const material_id &mat : bio->fuel_opts ) {
+            if( it->ammo_remaining() && it->first_ammo().made_of( mat ) ) {
+                // Ammo from magazines
+                stored_fuels.emplace_back( it.get_item() );
+            } else {
+                for( item *cit : it->all_items_top() ) {
+                    // Fuel from containers
+                    if( cit->made_of( mat ) ) {
+                        stored_fuels.emplace_back( it.get_item() );
+                        break;
+                    }
+                }
+            }
         }
     }
+
     return stored_fuels;
 }
 
-int Character::get_fuel_capacity( const material_id &fuel ) const
+std::vector<item *> Character::get_cable_ups()
 {
-    int amount_stored = 0;
-    if( !get_value( fuel.str() ).empty() ) {
-        amount_stored = std::stoi( get_value( fuel.str() ) );
+    std::vector<item *> stored_fuels;
+
+    int n = cache_get_items_with( flag_CABLE_SPOOL, []( const item & it ) {
+        return it.link_has_states( link_state::ups, link_state::bio_cable );
+    } ).size();
+    if( n == 0 ) {
+        return stored_fuels;
     }
-    int capacity = 0;
-    for( const bionic_id &bid : get_bionics() ) {
-        for( const material_id &fl : bid->fuel_opts ) {
-            if( get_value( bid.str() ).empty() || get_value( bid.str() ) == fl.str() ) {
-                if( fl == fuel ) {
-                    capacity += bid->fuel_capacity;
-                }
-            }
+
+    // There is no way to check which cable is connected to which ups
+    // So if there are multiple cables and some of them are only partially connected this may add wrong ups
+    for( item_location it : all_items_loc() ) {
+        if( it->has_flag( flag_IS_UPS ) && it->get_var( "cable" ) == "plugged_in" &&
+            it->ammo_remaining() ) {
+            stored_fuels.emplace_back( it.get_item() );
+            n--;
         }
-    }
-    return capacity - amount_stored;
-}
-
-int Character::get_total_fuel_capacity( const material_id &fuel ) const
-{
-    int capacity = 0;
-    for( const bionic_id &bid : get_bionics() ) {
-        for( const material_id &fl : bid->fuel_opts ) {
-            if( get_value( bid.str() ).empty() || get_value( bid.str() ) == fl.str() ) {
-                if( fl == fuel ) {
-                    capacity += bid->fuel_capacity;
-                }
-            }
-        }
-    }
-    return capacity;
-}
-
-void Character::update_fuel_storage( const material_id &fuel )
-{
-
-    if( get_value( fuel.str() ).empty() ) {
-        for( const bionic_id &bid : get_bionic_fueled_with( fuel ) ) {
-            remove_value( bid.c_str() );
-        }
-        return;
-    }
-
-    std::vector<bionic_id> bids = get_bionic_fueled_with( fuel );
-    if( bids.empty() ) {
-        return;
-    }
-    int amount_fuel_loaded = std::stoi( get_value( fuel.str() ) );
-    std::vector<bionic_id> loaded_bio;
-
-    // Sort bionic in order of decreasing capacity
-    // To fill the bigger ones firts.
-    bool swap = true;
-    while( swap ) {
-        swap = false;
-        for( size_t i = 0; i < bids.size() - 1; i++ ) {
-            if( bids[i + 1]->fuel_capacity > bids[i]->fuel_capacity ) {
-                std::swap( bids[i + 1], bids[i] );
-                swap = true;
-            }
-        }
-    }
-
-    for( const bionic_id &bid : bids ) {
-        remove_value( bid.c_str() );
-        if( bid->fuel_capacity <= amount_fuel_loaded ) {
-            amount_fuel_loaded -= bid->fuel_capacity;
-            loaded_bio.emplace_back( bid );
-        } else if( amount_fuel_loaded != 0 ) {
-            loaded_bio.emplace_back( bid );
+        if( n == 0 ) {
             break;
         }
     }
 
-    for( const bionic_id &bd : loaded_bio ) {
-        set_value( bd.str(), fuel.str() );
+    if( n > 0 && weapon.has_flag( flag_IS_UPS ) && weapon.get_var( "cable" ) == "plugged_in" &&
+        weapon.ammo_remaining() ) {
+        stored_fuels.emplace_back( &weapon.first_ammo() );
     }
 
+    return stored_fuels;
 }
 
-int Character::get_mod_stat_from_bionic( const character_stat &Stat ) const
+std::vector<item *> Character::get_cable_solar()
 {
-    int ret = 0;
-    for( const bionic_id &bid : get_bionics() ) {
-        const auto St_bn = bid->stat_bonus.find( Stat );
-        if( St_bn != bid->stat_bonus.end() ) {
-            ret += St_bn->second;
+    std::vector<item *> solar_sources;
+
+    int n = cache_get_items_with( flag_CABLE_SPOOL, []( const item & it ) {
+        return it.link_has_states( link_state::solarpack, link_state::bio_cable );
+    } ).size();
+    if( n == 0 ) {
+        return solar_sources;
+    }
+
+    // There is no way to check which cable is connected to which solar pack
+    // So if there are multiple cables and some of them are only partially connected this may add wrong solar pack
+    for( item_location it : all_items_loc() ) {
+        if( it->has_flag( flag_SOLARPACK_ON ) && it->get_var( "cable" ) == "plugged_in" ) {
+            solar_sources.emplace_back( it.get_item() );
+            n--;
+        }
+        if( n == 0 ) {
+            break;
         }
     }
-    return ret;
+
+    if( n > 0 && weapon.has_flag( flag_SOLARPACK_ON ) && weapon.get_var( "cable" ) == "plugged_in" ) {
+        solar_sources.emplace_back( &weapon );
+    }
+
+    return solar_sources;
+}
+
+std::vector<vehicle *> Character::get_cable_vehicle() const
+{
+    std::vector<vehicle *> remote_vehicles;
+
+    std::vector<const item *> cables = cache_get_items_with( flag_CABLE_SPOOL,
+    []( const item & it ) {
+        return it.link_has_state( link_state::bio_cable ) &&
+               ( it.link_has_state( link_state::vehicle_battery ) ||
+                 it.link_has_state( link_state::vehicle_port ) );
+    } );
+    int n = cables.size();
+    if( n == 0 ) {
+        return remote_vehicles;
+    }
+
+    map &here = get_map();
+
+    for( const item *cable : cables ) {
+        if( cable->link().t_veh ) {
+            remote_vehicles.emplace_back( cable->link().t_veh.get() );
+        } else {
+            const optional_vpart_position vp = here.veh_at( cable->link().t_abs_pos );
+            if( vp ) {
+                remote_vehicles.emplace_back( &vp->vehicle() );
+            }
+        }
+    }
+
+    return remote_vehicles;
 }
 
 bool Character::is_using_bionic_weapon() const
@@ -3630,29 +3447,13 @@ bionic_uid Character::get_weapon_bionic_uid() const
     return weapon_bionic_uid;
 }
 
-float Character::bionic_armor_bonus( const bodypart_id &bp, damage_type dt ) const
+float Character::bionic_armor_bonus( const bodypart_id &bp, const damage_type_id &dt ) const
 {
     float result = 0.0f;
-    if( dt == damage_type::CUT || dt == damage_type::STAB ) {
-        for( const bionic_id &bid : get_bionics() ) {
-            const auto cut_prot = bid->cut_protec.find( bp.id() );
-            if( cut_prot != bid->cut_protec.end() ) {
-                result += cut_prot->second;
-            }
-        }
-    } else if( dt == damage_type::BASH ) {
-        for( const bionic_id &bid : get_bionics() ) {
-            const auto bash_prot = bid->bash_protec.find( bp.id() );
-            if( bash_prot != bid->bash_protec.end() ) {
-                result += bash_prot->second;
-            }
-        }
-    } else if( dt == damage_type::BULLET ) {
-        for( const bionic_id &bid : get_bionics() ) {
-            const auto bullet_prot = bid->bullet_protec.find( bp.id() );
-            if( bullet_prot != bid->bullet_protec.end() ) {
-                result += bullet_prot->second;
-            }
+    for( const bionic_id &bid : get_bionics() ) {
+        const auto prot = bid->protec.find( bp.id() );
+        if( prot != bid->protec.end() ) {
+            result += prot->second.type_resist( dt );
         }
     }
 

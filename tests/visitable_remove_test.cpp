@@ -3,6 +3,7 @@
 #include <list>
 #include <memory>
 #include <new>
+#include <optional>
 #include <vector>
 
 #include "calendar.h"
@@ -13,8 +14,8 @@
 #include "item.h"
 #include "itype.h"
 #include "map.h"
+#include "map_helpers.h"
 #include "map_selector.h"
-#include "optional.h"
 #include "pimpl.h"
 #include "player_helpers.h"
 #include "point.h"
@@ -26,9 +27,11 @@
 #include "visitable.h"
 #include "vpart_position.h"
 
+static const itype_id itype_backpack( "backpack" );
 static const itype_id itype_bone( "bone" );
 static const itype_id itype_bottle_plastic( "bottle_plastic" );
 static const itype_id itype_flask_hip( "flask_hip" );
+static const itype_id itype_null( "null" );
 static const itype_id itype_water( "water" );
 
 static const vproto_id vehicle_prototype_shopping_cart( "shopping_cart" );
@@ -57,14 +60,15 @@ TEST_CASE( "visitable_remove", "[visitable]" )
 
     clear_avatar();
     Character &p = get_player_character();
-    p.worn.wear_item( p, item( "backpack" ), false, false );
-    p.wear_item( item( "backpack" ) ); // so we don't drop anything
+    p.worn.wear_item( p, item( itype_backpack ), false, false );
+    p.wear_item( item( itype_backpack ) ); // so we don't drop anything
+    clear_map();
     map &here = get_map();
 
     // check if all tiles within radius are loaded within current submap and passable
-    const auto suitable = [&here]( const tripoint & pos, const int radius ) {
-        std::vector<tripoint> tiles = closest_points_first( pos, radius );
-        return std::all_of( tiles.begin(), tiles.end(), [&here]( const tripoint & e ) {
+    const auto suitable = [&here]( const tripoint_bub_ms & pos, const int radius ) {
+        std::vector<tripoint_bub_ms> tiles = closest_points_first( pos, radius );
+        return std::all_of( tiles.begin(), tiles.end(), [&here]( const tripoint_bub_ms & e ) {
             if( !here.inbounds( e ) ) {
                 return false;
             }
@@ -78,14 +82,14 @@ TEST_CASE( "visitable_remove", "[visitable]" )
 
     // move player randomly until we find a suitable position
     constexpr int num_trials = 100;
-    for( int i = 0; i < num_trials && !suitable( p.pos(), 1 ); ++i ) {
+    for( int i = 0; i < num_trials && !suitable( p.pos_bub(), 1 ); ++i ) {
         CHECK( !p.in_vehicle );
-        p.setpos( random_entry( closest_points_first( p.pos(), 1 ) ) );
+        p.setpos( random_entry( closest_points_first( p.pos_bub(), 1 ) ) );
     }
-    REQUIRE( suitable( p.pos(), 1 ) );
+    REQUIRE( suitable( p.pos_bub(), 1 ) );
 
     item temp_liquid( liquid_id );
-    item obj = temp_liquid.in_container( temp_liquid.type->default_container.value_or( "null" ) );
+    item obj = temp_liquid.in_container( temp_liquid.type->default_container.value_or( itype_null ) );
     REQUIRE( obj.num_item_stacks() == 1 );
     const auto has_liquid_filter = [&liquid_id]( const item & it ) {
         return it.typeId() == liquid_id;
@@ -155,7 +159,7 @@ TEST_CASE( "visitable_remove", "[visitable]" )
 
         WHEN( "one of the bottles is wielded" ) {
             p.wield( p.worn.front().legacy_front() );
-            REQUIRE( p.get_wielded_item().typeId() == container_id );
+            REQUIRE( p.get_wielded_item()->typeId() == container_id );
             REQUIRE( count_items( p, container_id ) == count );
             REQUIRE( count_items( p, liquid_id ) == count );
 
@@ -171,7 +175,7 @@ TEST_CASE( "visitable_remove", "[visitable]" )
                     REQUIRE( count_items( p, liquid_id ) == 0 );
                 }
                 THEN( "there is no currently wielded item" ) {
-                    REQUIRE( p.get_wielded_item().is_null() );
+                    REQUIRE( !p.get_wielded_item() );
                 }
                 THEN( "the correct number of items were removed" ) {
                     REQUIRE( del.size() == count );
@@ -197,11 +201,11 @@ TEST_CASE( "visitable_remove", "[visitable]" )
                 THEN( "there is only one bottle remaining in the players possession" ) {
                     REQUIRE( count_items( p, container_id ) == 1 );
                     AND_THEN( "the remaining bottle is currently wielded" ) {
-                        REQUIRE( p.get_wielded_item().typeId() == container_id );
+                        REQUIRE( p.get_wielded_item()->typeId() == container_id );
 
                         AND_THEN( "the remaining water is contained by the currently wielded bottle" ) {
-                            REQUIRE( p.get_wielded_item().num_item_stacks() == 1 );
-                            REQUIRE( p.get_wielded_item().has_item_with( has_liquid_filter ) );
+                            REQUIRE( p.get_wielded_item()->num_item_stacks() == 1 );
+                            REQUIRE( p.get_wielded_item()->has_item_with( has_liquid_filter ) );
                         }
                     }
                 }
@@ -304,7 +308,7 @@ TEST_CASE( "visitable_remove", "[visitable]" )
     }
 
     GIVEN( "A player surrounded by several bottles of water" ) {
-        std::vector<tripoint> tiles = closest_points_first( p.pos(), 1 );
+        std::vector<tripoint_bub_ms> tiles = closest_points_first( p.pos_bub(), 1 );
         tiles.erase( tiles.begin() ); // player tile
 
         int our = 0; // bottles placed on player tile
@@ -314,7 +318,7 @@ TEST_CASE( "visitable_remove", "[visitable]" )
             if( i == 0 || tiles.empty() ) {
                 // always place at least one bottle on player tile
                 our++;
-                here.add_item( p.pos(), obj );
+                here.add_item( p.pos_bub(), obj );
             } else {
                 // randomly place bottles on adjacent tiles
                 adj++;
@@ -323,8 +327,8 @@ TEST_CASE( "visitable_remove", "[visitable]" )
         }
         REQUIRE( our + adj == count );
 
-        map_selector sel( p.pos(), 1 );
-        map_cursor cur( p.pos() );
+        map_selector sel( p.pos_bub(), 1 );
+        map_cursor cur( p.pos_abs() );
 
         REQUIRE( count_items( sel, container_id ) == count );
         REQUIRE( count_items( sel, liquid_id ) == count );
@@ -421,27 +425,27 @@ TEST_CASE( "visitable_remove", "[visitable]" )
     }
 
     GIVEN( "An adjacent vehicle contains several bottles of water" ) {
-        std::vector<tripoint> tiles = closest_points_first( p.pos(), 1 );
+        std::vector<tripoint_bub_ms> tiles = closest_points_first( p.pos_bub(), 1 );
         tiles.erase( tiles.begin() ); // player tile
-        tripoint veh = random_entry( tiles );
+        tripoint_bub_ms veh = tripoint_bub_ms( random_entry( tiles ) );
         REQUIRE( here.add_vehicle( vehicle_prototype_shopping_cart, veh, 0_degrees, 0, 0 ) );
 
-        REQUIRE( std::count_if( tiles.begin(), tiles.end(), [&here]( const tripoint & e ) {
+        REQUIRE( std::count_if( tiles.begin(), tiles.end(), [&here]( const tripoint_bub_ms & e ) {
             return static_cast<bool>( here.veh_at( e ) );
         } ) == 1 );
 
-        const cata::optional<vpart_reference> vp = here.veh_at( veh ).part_with_feature( "CARGO", true );
+        const std::optional<vpart_reference> vp = here.veh_at( veh ).cargo();
         REQUIRE( vp );
         vehicle *const v = &vp->vehicle();
         const int part = vp->part_index();
         REQUIRE( part >= 0 );
         // Empty the vehicle of any cargo.
-        v->get_items( part ).clear();
+        v->get_items( vp->part() ).clear();
         for( int i = 0; i != count; ++i ) {
-            v->add_item( part, obj );
+            v->add_item( vp->part(), obj );
         }
 
-        vehicle_selector sel( p.pos(), 1 );
+        vehicle_selector sel( p.pos_bub(), 1 );
 
         REQUIRE( count_items( sel, container_id ) == count );
         REQUIRE( count_items( sel, liquid_id ) == count );
@@ -505,12 +509,12 @@ TEST_CASE( "visitable_remove", "[visitable]" )
 TEST_CASE( "inventory_remove_invalidates_binning_cache", "[visitable][inventory]" )
 {
     inventory inv;
-    std::list<item> items = { item( "bone" ) };
+    std::list<item> items = { item( itype_bone ) };
     inv += items;
-    CHECK( inv.charges_of( itype_bone ) == 1 );
+    CHECK( inv.amount_of( itype_bone ) == 1 );
     inv.remove_items_with( return_true<item> );
     CHECK( inv.size() == 0 );
     // The following used to be a heap use-after-free due to a caching bug.
     // Now should be safe.
-    CHECK( inv.charges_of( itype_bone ) == 0 );
+    CHECK( inv.amount_of( itype_bone ) == 0 );
 }

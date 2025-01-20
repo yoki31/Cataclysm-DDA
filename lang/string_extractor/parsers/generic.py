@@ -1,3 +1,4 @@
+from .enchant import parse_enchant
 from ..helper import get_singular_name
 from .use_action import parse_use_action
 from ..write_text import write_text
@@ -6,8 +7,6 @@ from ..write_text import write_text
 def parse_generic(json, origin):
     name = ""
     comment = []
-    if "//" in json:
-        comment.append(json["//"])
     if "//isbn13" in json:
         comment.append("ISBN {}".format(json["//isbn13"]))
 
@@ -24,12 +23,24 @@ def parse_generic(json, origin):
 
     if "use_action" in json:
         parse_use_action(json["use_action"], origin, name)
+    if "tick_action" in json:
+        parse_use_action(json["tick_action"], origin, name)
 
     for cname in json.get("conditional_names", []):
         write_text(cname["name"], origin,
                    comment="Conditional name for \"{}\" when {} matches {}"
                    .format(name, cname["type"], cname["condition"]),
                    plural=True)
+
+    if "variants" in json:
+        for variant in json["variants"]:
+            variant_name = get_singular_name(variant["name"])
+            write_text(variant["name"], origin,
+                       comment="Variant name of item \"{}\"".format(name),
+                       plural=True)
+            write_text(variant["description"], origin,
+                       comment="Description of variant \"{1}\" of item \"{0}\""
+                       .format(name, variant_name))
 
     if "snippet_category" in json and type(json["snippet_category"]) is list:
         # snippet_category is either a simple string (the category ident)
@@ -60,3 +71,7 @@ def parse_generic(json, origin):
                 write_text(pocket["name"], origin,
                            comment="Brief name of a pocket in item \"{}\""
                            .format(name))
+
+    if "relic_data" in json and "passive_effects" in json["relic_data"]:
+        for enchantment in json["relic_data"]["passive_effects"]:
+            parse_enchant(enchantment, origin)

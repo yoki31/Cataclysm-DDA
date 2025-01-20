@@ -4,7 +4,6 @@
 
 #include <array>
 #include <functional>
-#include <iosfwd>
 #include <map>
 #include <string>
 #include <vector>
@@ -12,6 +11,8 @@
 #include "advanced_inv_area.h"
 #include "advanced_inv_listitem.h"
 #include "cursesdef.h"
+#include "item_location.h"
+#include "units_fwd.h"
 
 class item;
 struct advanced_inv_pane_save_state;
@@ -23,12 +24,16 @@ enum advanced_inv_sortby {
     SORTBY_NAME,
     SORTBY_WEIGHT,
     SORTBY_VOLUME,
+    SORTBY_DENSITY,
     SORTBY_CHARGES,
     SORTBY_CATEGORY,
     SORTBY_DAMAGE,
     SORTBY_AMMO,
     SORTBY_SPOILAGE,
-    SORTBY_PRICE
+    SORTBY_PRICE,
+    SORTBY_PRICEPERVOLUME,
+    SORTBY_PRICEPERWEIGHT,
+    SORTBY_STACKS
 };
 
 /**
@@ -56,7 +61,7 @@ class advanced_inventory_pane
             return viewing_cargo;
         }
         advanced_inv_pane_save_state *save_state;
-        void save_settings();
+        void save_settings() const;
         void load_settings( int saved_area_idx,
                             const std::array<advanced_inv_area, NUM_AIM_LOCATIONS> &squares, bool is_re_enter );
         /**
@@ -67,13 +72,23 @@ class advanced_inventory_pane
         catacurses::window window;
         std::vector<advanced_inv_listitem> items;
         /**
-         * The current filter string.
-         */
-        std::string filter;
-        /**
          * Whether to recalculate the content of this pane.
          */
         bool recalc = false;
+        item_location target_item_after_recalc;
+
+        /**
+        * The active container item in container view.
+        */
+        item_location container;
+        /**
+        * The original location from which container view was entered.
+        */
+        aim_location container_base_loc = NUM_AIM_LOCATIONS;
+        /**
+        * The line number of the other pane's container, if it's inside this pane's aim location.
+        */
+        int other_cont = -1;
 
         void add_items_from_area( advanced_inv_area &square, bool vehicle_override = false );
         /**
@@ -113,13 +128,27 @@ class advanced_inventory_pane
          */
         advanced_inv_listitem *get_cur_item_ptr();
         /**
-         * Set the filter string, disables filtering when the filter string is empty.
+         * @return free volume capacity of the pane's container or area
+         */
+        units::volume free_volume( const advanced_inv_area &square ) const;
+        /**
+         * @return free weight capacity of the pane's container or area
+         */
+        units::mass free_weight_capacity() const;
+        /**
+         * Set the filter string and update filter_function.
          */
         void set_filter( const std::string &new_filter );
+        std::string get_filter() const {
+            return filter;
+        };
     private:
+        /**
+         * The current filter string. And function representing that filter.
+         */
+        std::string filter;
+        std::function<bool( const item & )> filter_function;
         /** Only add offset to index, but wrap around! */
         void mod_index( int offset );
-
-        mutable std::map<std::string, std::function<bool( const item & )>> filtercache;
 };
 #endif // CATA_SRC_ADVANCED_INV_PANE_H

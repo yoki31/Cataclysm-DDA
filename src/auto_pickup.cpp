@@ -3,41 +3,51 @@
 #include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <iosfwd>
+#include <map>
 #include <memory>
-#include <type_traits>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+#include "cata_path.h"
 #include "cata_utility.h"
 #include "character.h"
 #include "color.h"
 #include "cursesdef.h"
 #include "filesystem.h"
-#include "game.h"
-#include "input.h"
+#include "flag.h"
+#include "flat_set.h"
+#include "flexbuffer_json-inl.h"
+#include "flexbuffer_json.h"
+#include "input_context.h"
+#include "input_popup.h"
 #include "item.h"
 #include "item_factory.h"
+#include "item_location.h"
 #include "item_stack.h"
 #include "itype.h"
-#include "map.h"
 #include "json.h"
+#include "map.h"
+#include "map_selector.h"
 #include "material.h"
 #include "options.h"
 #include "output.h"
 #include "path_info.h"
 #include "point.h"
 #include "string_formatter.h"
-#include "string_input_popup.h"
 #include "translations.h"
 #include "type_id.h"
+#include "ui.h"
 #include "ui_manager.h"
+#include "units.h"
 
 using namespace auto_pickup;
 
 static const ammotype ammo_battery( "battery" );
 
 static bool check_special_rule( const std::map<material_id, int> &materials,
-                                const std::string &rule );
+                                std::string_view rule );
 
 auto_pickup::player_settings &get_auto_pickup()
 {
@@ -48,21 +58,23 @@ auto_pickup::player_settings &get_auto_pickup()
 /**
  * The function will return `true` if the user has set all limits to a value of 0.
  * @param pickup_item item to check.
- * @return `true` if given item's weight and volume is within autopickup user configured limits.
+ * @return `true` if given item's weight and volume is within auto pickup user configured limits.
  */
 static bool within_autopickup_limits( const item *pickup_item )
 {
+    bool valid_item = !pickup_item->has_any_flag( cata::flat_set<flag_id> { flag_ZERO_WEIGHT, flag_NO_DROP } );
+
     int weight_limit = get_option<int>( "AUTO_PICKUP_WEIGHT_LIMIT" );
     int volume_limit = get_option<int>( "AUTO_PICKUP_VOLUME_LIMIT" );
 
     bool valid_volume = pickup_item->volume() <= volume_limit * 50_ml;
     bool valid_weight = pickup_item->weight() <= weight_limit * 50_gram;
 
-    return ( volume_limit <= 0 || valid_volume ) && ( weight_limit <= 0 || valid_weight );
+    return valid_item && ( volume_limit <= 0 || valid_volume ) && ( weight_limit <= 0 || valid_weight );
 }
 
 /**
- * @param pickup_item item to get the autopickup rule for.
+ * @param pickup_item item to get the auto pickup rule for.
  * @return `rule_state` associated with the given item.
  */
 static rule_state get_autopickup_rule( const item *pickup_item )
@@ -86,13 +98,13 @@ static rule_state get_autopickup_rule( const item *pickup_item )
 }
 
 /**
- * Drop all items from the given container that match special autopickup rules.
+ * Drop all items from the given container that match special auto pickup rules.
  * The items will be removed from the container and dropped in the designated location.
  *
  * @param from container to drop items from.
  * @param where location on the map to drop items to.
  */
-static void empty_autopickup_target( item *what, tripoint where )
+static void empty_autopickup_target( item *what, tripoint_bub_ms where )
 {
     bool is_rigid = what->all_pockets_rigid();
     for( item *entry : what->all_items_top() ) {
@@ -107,9 +119,9 @@ static void empty_autopickup_target( item *what, tripoint where )
 }
 
 /**
- * Iterate through every item inside the container to find items that match autopickup rules.
+ * Iterate through every item inside the container to find items that match auto pickup rules.
  * In most cases whitelisted items will be included and blacklisted one will be excluded however
- * there are special cases. Below is an overview of selection rules for container autopickup.
+ * there are special cases. Below is an overview of selection rules for container auto pickup.
  *
  * Containers and items will **never** be picked up when:
  *
@@ -132,18 +144,18 @@ static void empty_autopickup_target( item *what, tripoint where )
  *
  * - the parent container is non-rigid and the item is not whitelisted.
  *
- * @param from item to search for items to autopickup from.
- * @return sequence of items to autopickup from given container.
+ * @param from item to search for items to auto pickup from.
+ * @return sequence of items to auto pickup from given container.
  */
 static std::vector<item_location> get_autopickup_items( item_location &from )
 {
     item *container_item = from.get_item();
-    // items sealed in containers should never be unsealed by autopickup
+    // items sealed in containers should never be unsealed by auto pickup
     bool force_pick_container = container_item->any_pockets_sealed();
     bool pick_all_items = true;
 
     std::vector<item_location> result;
-    // do not autopickup owned containers or items
+    // do not auto pickup owned containers or items
     if( !get_option<bool>( "AUTO_PICKUP_OWNED" ) &&
         container_item->is_owned_by( get_player_character() ) ) {
         return result;
@@ -151,8 +163,9 @@ static std::vector<item_location> get_autopickup_items( item_location &from )
     std::list<item *> contents = container_item->all_items_top();
     result.reserve( contents.size() );
 
+    bool any_whitelisted = false;
     std::list<item *>::iterator it;
-    for( it = contents.begin(); it != contents.end() && !force_pick_container; ++it ) {
+    for( it = contents.begin(); it != contents.end(); ++it ) {
         item *item_entry = *it;
         if( !within_autopickup_limits( item_entry ) ) {
             pick_all_items = false;
@@ -160,17 +173,21 @@ static std::vector<item_location> get_autopickup_items( item_location &from )
         }
         const rule_state pickup_state = get_autopickup_rule( item_entry );
         if( pickup_state == rule_state::WHITELISTED ) {
-            if( item_entry->is_container() ) {
-                // whitelisted containers should exclude contained blacklisted items
-                empty_autopickup_target( item_entry, from.position() );
-            } else if( item_entry->made_of_from_type( phase_id::LIQUID ) ) {
-                // liquid items should never be picked up without container
-                force_pick_container = true;
-                break;
+            any_whitelisted = true;
+            if( !force_pick_container ) {
+                if( item_entry->is_container() ) {
+                    // whitelisted containers should exclude contained blacklisted items
+                    empty_autopickup_target( item_entry, from.pos_bub() );
+                } else if( item_entry->made_of_from_type( phase_id::LIQUID ) ) {
+                    // liquid items should never be picked up without container
+                    force_pick_container = true;
+                    break;
+                }
+                // pick up the whitelisted item
+                result.emplace_back( from, item_entry );
             }
-            // pick up the whitelisted item
-            result.emplace_back( from, item_entry );
-        } else if( item_entry->is_container() && !item_entry->is_container_empty() ) {
+        } else if( !force_pick_container && item_entry->is_container() &&
+                   !item_entry->is_container_empty() ) {
             // get pickup list from nested item container
             item_location location = item_location( from, item_entry );
             std::vector<item_location> result_nested = get_autopickup_items( location );
@@ -188,11 +205,11 @@ static std::vector<item_location> get_autopickup_items( item_location &from )
     }
     // all items in container were approved for pickup
     if( !contents.empty() && ( pick_all_items || force_pick_container ) ) {
-        // only autopickup corpses if they are whitelisted
+        // only auto pickup corpses if they are whitelisted
         // blacklisted containers should still have their contents picked up but themselves should be excluded.
         // If all items inside blacklisted container match then just pickup the items without the container
         rule_state pickup_state = get_autopickup_rule( container_item );
-        if( pickup_state == rule_state::BLACKLISTED ||
+        if( pickup_state == rule_state::BLACKLISTED || !any_whitelisted ||
             ( container_item->is_corpse() && pickup_state != rule_state::WHITELISTED ) ) {
             return result;
         }
@@ -229,7 +246,7 @@ static std::vector<item_location> get_autopickup_items( item_location &from )
  * @return sequence of selected items on the map.
  */
 drop_locations auto_pickup::select_items(
-    const std::vector<item_stack::iterator> &from, const tripoint &location )
+    const std::vector<item_stack::iterator> &from, const tripoint_bub_ms &location )
 {
     drop_locations result;
     const map_cursor map_location = map_cursor( location );
@@ -237,12 +254,15 @@ drop_locations auto_pickup::select_items(
     // iterate over all item stacks found in location
     for( const item_stack::iterator &stack : from ) {
         item *item_entry = &*stack;
-        // do not autopickup owned containers or items
+        // do not auto pickup owned containers or items
         if( !get_option<bool>( "AUTO_PICKUP_OWNED" ) &&
             item_entry->is_owned_by( get_player_character() ) ) {
             continue;
         }
-        std::string sItemName = item_entry->tname( 1, false );
+        // do not auto pickup spilt liquids
+        if( item_entry->made_of( phase_id::LIQUID ) ) {
+            continue;
+        }
         rule_state pickup_state = get_autopickup_rule( item_entry );
         bool is_container = item_entry->is_container() && !item_entry->empty_container();
 
@@ -255,13 +275,13 @@ drop_locations auto_pickup::select_items(
             if( !within_autopickup_limits( item_entry ) ) {
                 continue;
             }
-            int it_count = 0; // TODO: factor in autopickup max_quantity here
+            int it_count = 0; // TODO: factor in auto pickup max_quantity here
             item_location it_location = item_location( map_location, item_entry );
             result.emplace_back( std::make_pair( it_location, it_count ) );
         } else if( is_container || item_entry->ammo_capacity( ammo_battery ) ) {
             item_location container_location = item_location( map_location, item_entry );
             for( const item_location &add_item : get_autopickup_items( container_location ) ) {
-                int it_count = 0; // TODO: factor in autopickup max_quantity here
+                int it_count = 0; // TODO: factor in auto pickup max_quantity here
                 result.emplace_back( std::make_pair( add_item, it_count ) );
             }
         }
@@ -277,7 +297,6 @@ void user_interface::show()
 
     const int iHeaderHeight = 4;
     int iContentHeight = 0;
-    const int iTotalCols = 2;
 
     catacurses::window w_border;
     catacurses::window w_header;
@@ -293,7 +312,7 @@ void user_interface::show()
         w_border = catacurses::newwin( FULL_SCREEN_HEIGHT, FULL_SCREEN_WIDTH,
                                        iOffset );
         w_header = catacurses::newwin( iHeaderHeight, FULL_SCREEN_WIDTH - 2,
-                                       iOffset + point_south_east );
+                                       iOffset + point::south_east );
         w = catacurses::newwin( iContentHeight, FULL_SCREEN_WIDTH - 2,
                                 iOffset + point( 1, iHeaderHeight + 1 ) );
 
@@ -304,21 +323,24 @@ void user_interface::show()
 
     size_t iTab = 0;
     int iLine = 0;
-    int iColumn = 1;
+    bool bLeftColumn = true;
     int iStartPos = 0;
     Character &player_character = get_player_character();
 
     ui.on_redraw( [&]( const ui_adaptor & ) {
         // Redraw the border
         draw_border( w_border, BORDER_COLOR, title );
+
+        wattron( w, c_light_gray );
         // |-
-        mvwputch( w_border, point( 0, 3 ), c_light_gray, LINE_XXXO );
+        mvwaddch( w_border, point( 0, 3 ), LINE_XXXO );
         // -|
-        mvwputch( w_border, point( 79, 3 ), c_light_gray, LINE_XOXX );
+        mvwaddch( w_border, point( 79, 3 ), LINE_XOXX );
         // _|_
-        mvwputch( w_border, point( 5, FULL_SCREEN_HEIGHT - 1 ), c_light_gray, LINE_XXOX );
-        mvwputch( w_border, point( 51, FULL_SCREEN_HEIGHT - 1 ), c_light_gray, LINE_XXOX );
-        mvwputch( w_border, point( 61, FULL_SCREEN_HEIGHT - 1 ), c_light_gray, LINE_XXOX );
+        mvwaddch( w_border, point( 5, FULL_SCREEN_HEIGHT - 1 ), LINE_XXOX );
+        mvwaddch( w_border, point( 51, FULL_SCREEN_HEIGHT - 1 ), LINE_XXOX );
+        mvwaddch( w_border, point( 61, FULL_SCREEN_HEIGHT - 1 ), LINE_XXOX );
+        wattroff( w, c_light_gray );
         wnoutrefresh( w_border );
 
         // Redraw the header
@@ -339,18 +361,18 @@ void user_interface::show()
                                 _( "<Enter>-Edit" ) ) + 2;
         shortcut_print( w_header, point( tmpx, 1 ), c_white, c_light_green, _( "<Tab>-Switch Page" ) );
 
-        for( int i = 0; i < 78; i++ ) {
-            if( i == 4 || i == 50 || i == 60 ) {
-                mvwputch( w_header, point( i, 2 ), c_light_gray, LINE_OXXX );
-                mvwputch( w_header, point( i, 3 ), c_light_gray, LINE_XOXO );
-            } else {
-                // Draw line under header
-                mvwputch( w_header, point( i, 2 ), c_light_gray, LINE_OXOX );
-            }
+        wattron( w_header, c_light_gray );
+        mvwhline( w_header, point( 0,  2 ), LINE_OXOX, 78 );
+        for( int x : {
+                 4, 50, 60
+             } ) {
+            mvwaddch( w_header, point( x, 2 ), LINE_OXXX );
+            mvwaddch( w_header, point( x, 3 ), LINE_XOXO );
         }
+        wattroff( w_header, c_light_gray );
         mvwprintz( w_header, point( 1, 3 ), c_white, "#" );
         mvwprintz( w_header, point( 8, 3 ), c_white, _( "Rules" ) );
-        mvwprintz( w_header, point( 52, 3 ), c_white, _( "I/E" ) );
+        mvwprintz( w_header, point( 52, 3 ), c_white, _( "Inc/Exc" ) );
 
         rule_list &cur_rules = tabs[iTab].new_rules;
         int locx = 17;
@@ -371,14 +393,11 @@ void user_interface::show()
         wnoutrefresh( w_header );
 
         // Clear the lines
-        for( int i = 0; i < iContentHeight; i++ ) {
-            for( int j = 0; j < 79; j++ ) {
-                if( j == 4 || j == 50 || j == 60 ) {
-                    mvwputch( w, point( j, i ), c_light_gray, LINE_XOXO );
-                } else {
-                    mvwputch( w, point( j, i ), c_black, ' ' );
-                }
-            }
+        mvwrectf( w, point::zero, c_black, ' ', 79, iContentHeight );
+        for( int x : {
+                 4, 50, 60
+             } ) {
+            mvwvline( w, point( x, 0 ), c_light_gray, LINE_XOXO, iContentHeight );
         }
 
         draw_scrollbar( w_border, iLine, iContentHeight, cur_rules.size(), point( 0, 5 ) );
@@ -389,8 +408,7 @@ void user_interface::show()
         // display auto pickup
         for( int i = iStartPos; i < static_cast<int>( cur_rules.size() ); i++ ) {
             if( i >= iStartPos &&
-                i < iStartPos + ( iContentHeight > static_cast<int>( cur_rules.size() ) ?
-                                  static_cast<int>( cur_rules.size() ) : iContentHeight ) ) {
+                i < iStartPos + std::min<int>( iContentHeight, cur_rules.size() ) ) {
                 nc_color cLineColor = cur_rules[i].bActive ? c_white : c_light_gray;
 
                 mvwprintz( w, point( 1, i - iStartPos ), cLineColor, "%d", i + 1 );
@@ -402,10 +420,10 @@ void user_interface::show()
                     wprintz( w, c_yellow, "   " );
                 }
 
-                wprintz( w, iLine == i && iColumn == 1 ? hilite( cLineColor ) : cLineColor, "%s",
+                wprintz( w, iLine == i && bLeftColumn ? hilite( cLineColor ) : cLineColor, "%s",
                          cur_rules[i].sRule.empty() ? _( "<empty rule>" ) : cur_rules[i].sRule );
 
-                mvwprintz( w, point( 52, i - iStartPos ), iLine == i && iColumn == 2 ?
+                mvwprintz( w, point( 52, i - iStartPos ), iLine == i && !bLeftColumn ?
                            hilite( cLineColor ) : cLineColor, "%s",
                            cur_rules[i].bExclude ? _( "Exclude" ) :  _( "Include" ) );
             }
@@ -416,9 +434,8 @@ void user_interface::show()
 
     bStuffChanged = false;
     input_context ctxt( "AUTO_PICKUP" );
-    ctxt.register_cardinal();
-    ctxt.register_action( "PAGE_UP", to_translation( "Fast scroll up" ) );
-    ctxt.register_action( "PAGE_DOWN", to_translation( "Fast scroll down" ) );
+    ctxt.register_navigate_ui_list();
+    ctxt.register_leftright();
     ctxt.register_action( "CONFIRM" );
     ctxt.register_action( "QUIT" );
     if( tabs.size() > 1 ) {
@@ -434,14 +451,11 @@ void user_interface::show()
     ctxt.register_action( "MOVE_RULE_DOWN" );
     ctxt.register_action( "TEST_RULE" );
     ctxt.register_action( "HELP_KEYBINDINGS" );
+    ctxt.register_action( "SWITCH_AUTO_PICKUP_OPTION" );
 
     const bool allow_swapping = tabs.size() == 2;
     if( allow_swapping ) {
         ctxt.register_action( "SWAP_RULE_GLOBAL_CHAR" );
-    }
-
-    if( is_autopickup ) {
-        ctxt.register_action( "SWITCH_AUTO_PICKUP_OPTION" );
     }
 
     while( true ) {
@@ -470,36 +484,7 @@ void user_interface::show()
             iLine = 0;
         } else if( action == "QUIT" ) {
             break;
-        } else if( action == "DOWN" ) {
-            iLine++;
-            iColumn = 1;
-            if( iLine >= recmax ) {
-                iLine = 0;
-            }
-        } else if( action == "UP" ) {
-            iLine--;
-            iColumn = 1;
-            if( iLine < 0 ) {
-                iLine = cur_rules.size() - 1;
-            }
-        } else if( action == "PAGE_DOWN" ) {
-            if( iLine == recmax - 1 ) {
-                iLine = 0;
-            } else if( iLine + scroll_rate >= recmax ) {
-                iLine = recmax - 1;
-            } else {
-                iLine += +scroll_rate;
-                iColumn = 1;
-            }
-        } else if( action == "PAGE_UP" ) {
-            if( iLine == 0 ) {
-                iLine = recmax - 1;
-            } else if( iLine <= scroll_rate ) {
-                iLine = 0;
-            } else {
-                iLine += -scroll_rate;
-                iColumn = 1;
-            }
+        } else if( navigate_ui_list( action, iLine, scroll_rate, recmax, true ) ) {
         } else if( action == "REMOVE_RULE" && currentPageNonEmpty ) {
             bStuffChanged = true;
             cur_rules.erase( cur_rules.begin() + iLine );
@@ -531,46 +516,25 @@ void user_interface::show()
             }
             ui_manager::redraw();
 
-            if( iColumn == 1 || action == "ADD_RULE" ) {
-                ui_adaptor help_ui;
-                catacurses::window w_help;
-                const auto init_help_window = [&]( ui_adaptor & help_ui ) {
-                    const point iOffset( TERMX > FULL_SCREEN_WIDTH ? ( TERMX - FULL_SCREEN_WIDTH ) / 2 : 0,
-                                         TERMY > FULL_SCREEN_HEIGHT ? ( TERMY - FULL_SCREEN_HEIGHT ) / 2 : 0 );
-                    w_help = catacurses::newwin( FULL_SCREEN_HEIGHT / 2 + 2,
-                                                 FULL_SCREEN_WIDTH * 3 / 4,
-                                                 iOffset + point( 19 / 2, 7 + FULL_SCREEN_HEIGHT / 2 / 2 ) );
-                    help_ui.position_from_window( w_help );
-                };
-                init_help_window( help_ui );
-                help_ui.on_screen_resize( init_help_window );
-
-                help_ui.on_redraw( [&]( const ui_adaptor & ) {
-                    // NOLINTNEXTLINE(cata-use-named-point-constants)
-                    fold_and_print( w_help, point( 1, 1 ), 999, c_white,
-                                    _(
-                                        "* is used as a Wildcard.  A few Examples:\n"
-                                        "\n"
-                                        "wooden arrow    matches the itemname exactly\n"
-                                        "wooden ar*      matches items beginning with wood ar\n"
-                                        "*rrow           matches items ending with rrow\n"
-                                        "*avy fle*fi*arrow     multiple * are allowed\n"
-                                        "heAVY*woOD*arrOW      case insensitive search\n"
-                                        "\n"
-                                        "Pickup based on item materials:\n"
-                                        "m:kevlar        matches items made of Kevlar\n"
-                                        "M:copper        matches items made purely of copper\n"
-                                        "M:steel,iron    multiple materials allowed (OR search)" )
-                                  );
-
-                    draw_border( w_help );
-                    wnoutrefresh( w_help );
-                } );
-                const std::string r = string_input_popup()
-                                      .title( _( "Pickup Rule:" ) )
-                                      .width( 30 )
-                                      .text( cur_rules[iLine].sRule )
-                                      .query_string();
+            if( bLeftColumn || action == "ADD_RULE" ) {
+                string_input_popup_imgui popup( 60, cur_rules[iLine].sRule );
+                popup.set_label( _( "Pickup Rule:" ) );
+                std::string description = _(
+                                              "* is used as a Wildcard.  A few Examples:\n"
+                                              "\n"
+                                              "wooden arrow    matches the itemname exactly\n"
+                                              "wooden ar*      matches items beginning with wood ar\n"
+                                              "*rrow           matches items ending with rrow\n"
+                                              "*avy fle*fi*arrow     multiple * are allowed\n"
+                                              "heAVY*woOD*arrOW      case insensitive search\n"
+                                              "\n"
+                                              "Pickup based on item materials:\n"
+                                              "m:kevlar        matches items made of Kevlar\n"
+                                              "M:copper        matches items made purely of copper\n"
+                                              "M:steel,iron    multiple materials allowed (OR search)"
+                                          );
+                popup.set_description( description, c_white, true );
+                const std::string r = popup.query();
                 // If r is empty, then either (1) The player ESC'ed from the window (changed their mind), or
                 // (2) Explicitly entered an empty rule- which isn't allowed since "*" should be used
                 // to include/exclude everything
@@ -581,7 +545,7 @@ void user_interface::show()
                     cur_rules.pop_back();
                     iLine = old_iLine;
                 }
-            } else if( iColumn == 2 ) {
+            } else if( !bLeftColumn ) {
                 bStuffChanged = true;
                 cur_rules[iLine].bExclude = !cur_rules[iLine].bExclude;
             }
@@ -591,34 +555,23 @@ void user_interface::show()
         } else if( action == "DISABLE_RULE" && currentPageNonEmpty ) {
             bStuffChanged = true;
             cur_rules[iLine].bActive = false;
-        } else if( action == "LEFT" ) {
-            iColumn--;
-            if( iColumn < 1 ) {
-                iColumn = iTotalCols;
-            }
-        } else if( action == "RIGHT" ) {
-            iColumn++;
-            if( iColumn > iTotalCols ) {
-                iColumn = 1;
-            }
+        } else if( action == "LEFT" || action == "RIGHT" ) {
+            bLeftColumn = !bLeftColumn;
         } else if( action == "MOVE_RULE_UP" && currentPageNonEmpty ) {
             bStuffChanged = true;
             if( iLine < recmax - 1 ) {
                 std::swap( cur_rules[iLine], cur_rules[iLine + 1] );
                 iLine++;
-                iColumn = 1;
             }
         } else if( action == "MOVE_RULE_DOWN" && currentPageNonEmpty ) {
             bStuffChanged = true;
             if( iLine > 0 ) {
                 std::swap( cur_rules[iLine], cur_rules[iLine - 1] );
                 iLine--;
-                iColumn = 1;
             }
         } else if( action == "TEST_RULE" && currentPageNonEmpty && !player_character.name.empty() ) {
             cur_rules[iLine].test_pattern();
         } else if( action == "SWITCH_AUTO_PICKUP_OPTION" ) {
-            // TODO: Now that NPCs use this function, it could be used for them too
             get_options().get_option( "AUTO_PICKUP" ).setNext();
             get_options().save();
         }
@@ -642,12 +595,11 @@ void player_settings::show()
     user_interface ui;
 
     Character &player_character = get_player_character();
-    ui.title = _( " AUTO PICKUP MANAGER " );
+    ui.title = _( "Auto pickup manager" );
     ui.tabs.emplace_back( _( "[<Global>]" ), global_rules );
     if( !player_character.name.empty() ) {
         ui.tabs.emplace_back( _( "[<Character>]" ), character_rules );
     }
-    ui.is_autopickup = true;
 
     ui.show();
 
@@ -701,7 +653,7 @@ void rule::test_pattern() const
                              iOffset );
         w_test_rule_content = catacurses::newwin( iContentHeight,
                               iContentWidth - 2,
-                              iOffset + point_south_east );
+                              iOffset + point::south_east );
 
         ui.position_from_window( w_test_rule_border );
     };
@@ -716,9 +668,7 @@ void rule::test_pattern() const
     int iLine = 0;
 
     input_context ctxt( "AUTO_PICKUP_TEST" );
-    ctxt.register_updown();
-    ctxt.register_action( "PAGE_UP", to_translation( "Fast scroll up" ) );
-    ctxt.register_action( "PAGE_DOWN", to_translation( "Fast scroll down" ) );
+    ctxt.register_navigate_ui_list();
     ctxt.register_action( "QUIT" );
     ctxt.register_action( "HELP_KEYBINDINGS" );
 
@@ -729,19 +679,14 @@ void rule::test_pattern() const
         wnoutrefresh( w_test_rule_border );
 
         // Clear the lines
-        for( int i = 0; i < iContentHeight; i++ ) {
-            for( int j = 0; j < 79; j++ ) {
-                mvwputch( w_test_rule_content, point( j, i ), c_black, ' ' );
-            }
-        }
+        mvwrectf( w_test_rule_content, point::zero, c_black, ' ', 79, iContentHeight );
 
         calcStartPos( iStartPos, iLine, iContentHeight, vMatchingItems.size() );
 
         // display auto pickup
         for( int i = iStartPos; i < static_cast<int>( vMatchingItems.size() ); i++ ) {
             if( i >= iStartPos &&
-                i < iStartPos + ( iContentHeight > static_cast<int>( vMatchingItems.size() ) ?
-                                  static_cast<int>( vMatchingItems.size() ) : iContentHeight ) ) {
+                i < iStartPos + std::min<int>( iContentHeight, vMatchingItems.size() ) ) {
                 nc_color cLineColor = c_white;
 
                 mvwprintz( w_test_rule_content, point( 0, i - iStartPos ), cLineColor, "%d", i + 1 );
@@ -766,32 +711,7 @@ void rule::test_pattern() const
         const int recmax = static_cast<int>( vMatchingItems.size() );
         const int scroll_rate = recmax > 20 ? 10 : 3;
         const std::string action = ctxt.handle_input();
-        if( action == "DOWN" ) {
-            iLine++;
-            if( iLine >= recmax ) {
-                iLine = 0;
-            }
-        } else if( action == "UP" ) {
-            iLine--;
-            if( iLine < 0 ) {
-                iLine = recmax - 1;
-            }
-        } else if( action == "PAGE_DOWN" ) {
-            if( iLine == recmax - 1 ) {
-                iLine = 0;
-            } else if( iLine + scroll_rate >= recmax ) {
-                iLine = recmax - 1;
-            } else {
-                iLine += +scroll_rate;
-            }
-        } else if( action == "PAGE_UP" ) {
-            if( iLine == 0 ) {
-                iLine = recmax - 1;
-            } else if( iLine <= scroll_rate ) {
-                iLine = 0;
-            } else {
-                iLine += -scroll_rate;
-            }
+        if( navigate_ui_list( action, iLine, scroll_rate, recmax, true ) ) {
         } else if( action == "QUIT" ) {
             break;
         }
@@ -801,7 +721,7 @@ void rule::test_pattern() const
 bool player_settings::has_rule( const item *it )
 {
     const std::string &name = it->tname( 1 );
-    for( auto &elem : character_rules ) {
+    for( auto_pickup::rule &elem : character_rules ) {
         if( name.length() == elem.sRule.length() && ci_find_substr( name, elem.sRule ) != -1 ) {
             return true;
         }
@@ -815,7 +735,7 @@ void player_settings::add_rule( const item *it, bool include )
     create_rule( it );
 
     if( !get_option<bool>( "AUTO_PICKUP" ) &&
-        query_yn( _( "Autopickup is not enabled in the options.  Enable it now?" ) ) ) {
+        query_yn( _( "Auto pickup is not enabled in the options.  Enable it now?" ) ) ) {
         get_options().get_option( "AUTO_PICKUP" ).setNext();
         get_options().save();
     }
@@ -840,7 +760,7 @@ bool player_settings::empty() const
     return global_rules.empty() && character_rules.empty();
 }
 
-bool check_special_rule( const std::map<material_id, int> &materials, const std::string &rule )
+bool check_special_rule( const std::map<material_id, int> &materials, const std::string_view rule )
 {
     char type = ' ';
     std::vector<std::string> filter;
@@ -856,7 +776,7 @@ bool check_special_rule( const std::map<material_id, int> &materials, const std:
     if( type == 'm' ) {
         return std::any_of( materials.begin(),
         materials.end(), [&filter]( const std::pair<material_id, int> &mat ) {
-            return std::any_of( filter.begin(), filter.end(), [&mat]( const std::string & search ) {
+            return std::any_of( filter.begin(), filter.end(), [&mat]( const std::string_view search ) {
                 return lcmatch( mat.first->name(), search );
             } );
         } );
@@ -864,7 +784,7 @@ bool check_special_rule( const std::map<material_id, int> &materials, const std:
     } else if( type == 'M' ) {
         return std::all_of( materials.begin(),
         materials.end(), [&filter]( const std::pair<material_id, int> &mat ) {
-            return std::any_of( filter.begin(), filter.end(), [&mat]( const std::string & search ) {
+            return std::any_of( filter.begin(), filter.end(), [&mat]( const std::string_view search ) {
                 return lcmatch( mat.first->name(), search );
             } );
         } );
@@ -873,7 +793,7 @@ bool check_special_rule( const std::map<material_id, int> &materials, const std:
     return false;
 }
 
-//Special case. Required for NPC harvest autopickup. Ignores material rules.
+//Special case. Required for NPC harvest auto pickup. Ignores material rules.
 void npc_settings::create_rule( const std::string &to_match )
 {
     rules.create_rule( map_items, to_match );
@@ -989,12 +909,12 @@ bool player_settings::save_global()
 
 bool player_settings::save( const bool bCharacter )
 {
-    auto savefile = PATH_INFO::autopickup();
+    cata_path savefile = PATH_INFO::autopickup();
 
     if( bCharacter ) {
         savefile = PATH_INFO::player_base_save_path() + ".apu.json";
 
-        const std::string player_save = PATH_INFO::player_base_save_path() + ".sav";
+        const cata_path player_save = PATH_INFO::player_base_save_path() + ".sav";
         //Character not saved yet.
         if( !file_exist( player_save ) ) {
             return true;
@@ -1004,7 +924,7 @@ bool player_settings::save( const bool bCharacter )
     return write_to_file( savefile, [&]( std::ostream & fout ) {
         JsonOut jout( fout, true );
         ( bCharacter ? character_rules : global_rules ).serialize( jout );
-    }, _( "autopickup configuration" ) );
+    }, _( "auto pickup configuration" ) );
 }
 
 void player_settings::load_character()
@@ -1019,13 +939,13 @@ void player_settings::load_global()
 
 void player_settings::load( const bool bCharacter )
 {
-    std::string sFile = PATH_INFO::autopickup();
+    cata_path sFile = PATH_INFO::autopickup();
     if( bCharacter ) {
         sFile = PATH_INFO::player_base_save_path() + ".apu.json";
     }
 
-    read_from_file_optional_json( sFile, [&]( JsonIn & jsin ) {
-        ( bCharacter ? character_rules : global_rules ).deserialize( jsin );
+    read_from_file_optional_json( sFile, [&]( const JsonValue & jv ) {
+        ( bCharacter ? character_rules : global_rules ).deserialize( jv );
     } ) ;
 
     invalidate();
@@ -1056,14 +976,13 @@ void rule::deserialize( const JsonObject &jo )
     bExclude = jo.get_bool( "exclude" );
 }
 
-void rule_list::deserialize( JsonIn &jsin )
+void rule_list::deserialize( const JsonArray &ja )
 {
     clear();
 
-    jsin.start_array();
-    while( !jsin.end_array() ) {
+    for( JsonObject jo : ja ) {
         rule tmp;
-        tmp.deserialize( jsin.get_object() );
+        tmp.deserialize( jo );
         push_back( tmp );
     }
 }
@@ -1086,9 +1005,9 @@ void npc_settings::serialize( JsonOut &jsout ) const
     rules.serialize( jsout );
 }
 
-void npc_settings::deserialize( JsonIn &jsin )
+void npc_settings::deserialize( const JsonArray &ja )
 {
-    rules.deserialize( jsin );
+    rules.deserialize( ja );
 }
 
 void npc_settings::refresh_map_items( cache &map_items ) const
